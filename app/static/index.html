@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>可靠度實驗室設備預約</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>可靠度實驗室設備預約</h1>
+      <p>部門內 MVP：設備清單、預約、防重覆、修改取消與基本維護</p>
+    </div>
+    <div class="header-actions">
+      <button id="refreshBtn" class="secondary">重新整理</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="notice" aria-label="資料庫狀態">
+      目前資料儲存在本機 SQLite；前端畫面會直接讀取這個資料庫顯示設備、預約清單與甘特圖。
+    </section>
+
+    <section class="dashboard-panel" aria-label="Dashboard">
+      <div id="dashboardMetrics" class="metrics-grid"></div>
+    </section>
+
+    <section class="panel summary-panel" aria-label="設備狀態">
+      <div class="section-title">
+        <h2>設備狀態管理</h2>
+      </div>
+      <div id="equipmentSummary" class="summary-grid"></div>
+    </section>
+
+    <section class="panel reservation-panel" aria-label="建立預約">
+      <div class="section-title">
+        <h2>建立預約</h2>
+      </div>
+      <form id="reservationForm" class="form-grid">
+        <label>
+          設備
+          <select name="equipment_id" required></select>
+        </label>
+        <label>
+          借用人
+          <input name="requester_name" required placeholder="例如：王小明">
+        </label>
+        <label>
+          Email
+          <input name="requester_email" type="email" required placeholder="name@example.com">
+        </label>
+        <label>
+          部門
+          <input name="department" required value="可靠度實驗室">
+        </label>
+        <label>
+          開始時間
+          <input name="start_time" type="datetime-local" required>
+        </label>
+        <label>
+          結束時間
+          <input name="end_time" type="datetime-local" required>
+        </label>
+        <label class="wide">
+          借用目的
+          <select name="purpose" required>
+            <option value="可靠度驗證">可靠度驗證</option>
+            <option value="失效分析">失效分析</option>
+            <option value="樣品預篩">樣品預篩</option>
+            <option value="客戶要求">客戶要求</option>
+            <option value="其他">其他</option>
+          </select>
+        </label>
+        <label class="wide">
+          備註
+          <textarea name="notes" rows="3" placeholder="測試條件、料號、注意事項"></textarea>
+        </label>
+        <div class="form-actions wide">
+          <button type="submit">送出預約</button>
+          <span id="formMessage" role="status"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel schedule-panel" aria-label="預約清單">
+      <div class="section-title with-controls">
+        <h2>本週預約</h2>
+        <div class="week-controls">
+          <button id="prevWeek" class="icon-btn" title="上一週" aria-label="上一週">‹</button>
+          <span id="weekLabel"></span>
+          <button id="nextWeek" class="icon-btn" title="下一週" aria-label="下一週">›</button>
+        </div>
+      </div>
+      <div id="scheduleBoard" class="schedule-board"></div>
+    </section>
+
+    <section class="panel gantt-panel" aria-label="設備使用甘特圖">
+      <div class="section-title">
+        <h2>設備使用甘特圖</h2>
+      </div>
+      <div class="gantt-wrap">
+        <div id="ganttScale" class="gantt-scale"></div>
+        <div id="ganttChart" class="gantt-chart"></div>
+      </div>
+    </section>
+
+    <section class="panel list-panel" aria-label="預約明細">
+      <div class="section-title">
+        <h2>預約明細</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>設備</th>
+              <th>時間</th>
+              <th>借用人</th>
+              <th>目的</th>
+              <th>狀態</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="reservationRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel admin-panel" aria-label="設備維護">
+      <div class="section-title">
+        <h2>新增設備</h2>
+      </div>
+      <form id="equipmentForm" class="form-grid compact">
+        <label>
+          設備名稱
+          <input name="name" required placeholder="例如：環境箱 B">
+        </label>
+        <label>
+          類別
+          <input name="category" required placeholder="環境箱 / ESD / DROP">
+        </label>
+        <label>
+          位置
+          <input name="location" placeholder="可靠度實驗室 1F">
+        </label>
+        <label>
+          狀態
+          <select name="status">
+            <option value="available">可預約</option>
+            <option value="maintenance">維修中</option>
+            <option value="offline">停用</option>
+          </select>
+        </label>
+        <div class="form-actions wide">
+          <button type="submit" class="secondary">新增設備</button>
+          <span id="equipmentMessage" role="status"></span>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <template id="dayTemplate">
+    <article class="day-column">
+      <h3></h3>
+      <div class="day-events"></div>
+    </article>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>
