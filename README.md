@@ -2,7 +2,8 @@
 
 This repository is now organized for a fully hosted deployment:
 
-- `docs/`: production static site for GitHub Pages
+- repo root (`index.html`, `app.js`, `styles.css`): primary hosted frontend
+- `docs/`: compatibility redirect for older GitHub Pages settings
 - `app/static/`: source copy of the frontend for local development
 - `supabase/manual/`: SQL scripts to run manually in Supabase SQL Editor
 - `app/server.py`: legacy local fallback and test harness
@@ -13,16 +14,16 @@ This repository is now organized for a fully hosted deployment:
 Use:
 
 - Branch: `main`
-- Folder: `/docs`
+- Folder: `/ (root)`
 
-Then the public site URL will be the repository root path instead of `/app/static/`.
+Then the public site URL will load directly from the repository root.
 
 ## Deploy flow
 
 1. Push the repository to GitHub.
 2. In GitHub repository settings, open `Pages`.
 3. Set source to `Deploy from a branch`.
-4. Choose `main` and `/docs`.
+4. Choose `main` and `/ (root)`.
 5. Save and wait for publish.
 
 ## Supabase setup
@@ -36,7 +37,8 @@ Run these scripts in Supabase SQL Editor before using the hosted site:
 
 ## Entry points
 
-- Hosted site entry: [docs/index.html](C:/Users/105221/Documents/Codex/2026-07-01/new-chat/work/SNR.github.io/docs/index.html)
+- Hosted site entry: [index.html](C:/Users/105221/Documents/Codex/2026-07-01/new-chat/work/SNR.github.io/index.html)
+- Compatibility redirect: [docs/index.html](C:/Users/105221/Documents/Codex/2026-07-01/new-chat/work/SNR.github.io/docs/index.html)
 - Source frontend entry: [app/static/index.html](C:/Users/105221/Documents/Codex/2026-07-01/new-chat/work/SNR.github.io/app/static/index.html)
 
 ## Browser configuration

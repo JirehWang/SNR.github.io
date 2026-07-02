@@ -3,6 +3,7 @@ from pathlib import Path
 
 
 STATIC = Path(__file__).resolve().parents[1] / "app" / "static"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class StaticUiTestCase(unittest.TestCase):
@@ -124,6 +125,14 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn(".equipment-card-actions", css)
         self.assertIn(".requester-card", css)
         self.assertIn(".badge.validation", css)
+
+    def test_root_entry_is_the_real_frontend(self):
+        root_html = (ROOT / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn('id="reservationForm"', root_html)
+        self.assertIn('./styles.css', root_html)
+        self.assertIn('./app.js', root_html)
+        self.assertNotIn("http-equiv=\"refresh\"", root_html)
 
 
 if __name__ == "__main__":
