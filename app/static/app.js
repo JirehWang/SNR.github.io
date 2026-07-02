@@ -10,6 +10,7 @@ const state = {
   weekStart: startOfWeek(new Date()),
   activeView: "reservation",
   editingEquipmentId: null,
+  editingRequesterId: null,
   requesterSuggestions: {
     requester_name: [],
     requester_email: [],
@@ -47,6 +48,8 @@ function bindEvents() {
   document.getElementById("requesterForm").addEventListener("submit", submitRequester);
   document.getElementById("equipmentCancelBtn").addEventListener("click", cancelEquipmentEdit);
   document.getElementById("equipmentResetBtn").addEventListener("click", resetEquipmentForm);
+  document.getElementById("requesterCancelBtn").addEventListener("click", cancelRequesterEdit);
+  document.getElementById("requesterResetBtn").addEventListener("click", resetRequesterForm);
   document.querySelector("#reservationForm input[name='requester_name']").addEventListener("input", handleRequesterLookup);
   document.querySelector("#reservationForm input[name='requester_name']").addEventListener("change", syncRequesterFields);
   document.querySelector("#reservationForm input[name='requester_email']").addEventListener("input", handleRequesterLookup);
@@ -129,7 +132,7 @@ async function loadRequesterDirectory() {
   const { data, error } = await state.client
     .from("requester_directory")
     .select("id, name, email, department, sort_order, is_active")
-    .eq("is_active", true)
+    .order("is_active", { ascending: false })
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
 
@@ -206,6 +209,7 @@ function renderAll() {
   renderViewState();
   renderConnectionState();
   syncEquipmentForm();
+  syncRequesterForm();
 }
 
 function renderRequesterOptions() {
@@ -214,10 +218,12 @@ function renderRequesterOptions() {
   if (!nameList || !emailList) return;
 
   nameList.innerHTML = state.requesters
+    .filter((item) => item.is_active)
     .map((item) => `<option value="${escapeHtml(item.name)}"></option>`)
     .join("");
 
   emailList.innerHTML = state.requesters
+    .filter((item) => item.is_active)
     .map((item) => `<option value="${escapeHtml(item.email)}"></option>`)
     .join("");
 }
@@ -235,13 +241,27 @@ function renderRequesterSummary() {
     <article class="equipment-card requester-card">
       <div>
         <h3>${escapeHtml(item.name)}</h3>
+        <div class="equipment-state">
+          ${item.is_active ? "" : '<span class="badge inactive">停用</span>'}
+        </div>
         <div class="equipment-card-meta">
           <span>Email：${escapeHtml(item.email)}</span>
           <span>部門：${escapeHtml(item.department || "PQE")}</span>
         </div>
       </div>
+      <div class="equipment-card-actions">
+        <button type="button" class="secondary requester-edit-btn" data-edit-requester="${item.id}">編輯</button>
+        <button type="button" class="danger-link requester-delete-btn" data-delete-requester="${item.id}">刪除</button>
+      </div>
     </article>
   `).join("");
+
+  root.querySelectorAll("[data-edit-requester]").forEach((button) => {
+    button.addEventListener("click", () => startEditRequester(Number(button.dataset.editRequester)));
+  });
+  root.querySelectorAll("[data-delete-requester]").forEach((button) => {
+    button.addEventListener("click", () => deleteRequester(Number(button.dataset.deleteRequester)));
+  });
 }
 
 function renderConnectionState(forcedState = null) {
@@ -708,10 +728,12 @@ async function submitRequester(event) {
   const form = event.currentTarget;
   const message = document.getElementById("requesterMessage");
   const payload = Object.fromEntries(new FormData(form).entries());
+  const requesterId = payload.requester_id ? Number(payload.requester_id) : null;
   const row = {
     name: String(payload.name || "").trim(),
     email: String(payload.email || "").trim(),
     department: String(payload.department || "PQE").trim() || "PQE",
+    is_active: String(payload.is_active || "1") === "1",
   };
 
   if (!row.name) {
@@ -724,23 +746,126 @@ async function submitRequester(event) {
   }
 
   try {
-    const nextSort = (state.requesters.at(-1)?.sort_order || 0) + 10;
-    const { error } = await state.client
-      .from("requester_directory")
-      .insert({
-        ...row,
-        sort_order: nextSort,
-        is_active: true,
-      });
+    if (requesterId) {
+      const { error } = await state.client
+        .from("requester_directory")
+        .update(row)
+        .eq("id", requesterId);
+      assertNoError(error, "使用者更新失敗");
+      message.textContent = "使用者資料已更新。";
+      state.editingRequesterId = requesterId;
+    } else {
+      const nextSort = (state.requesters.at(-1)?.sort_order || 0) + 10;
+      const { error } = await state.client
+        .from("requester_directory")
+        .insert({
+          ...row,
+          sort_order: nextSort,
+        });
 
-    assertNoError(error, "使用者建立失敗");
-    message.textContent = "使用者已新增。";
+      assertNoError(error, "使用者建立失敗");
+      message.textContent = "使用者已新增。";
+    }
+
+    message.dataset.preserve = "true";
     form.reset();
     form.elements.department.value = "PQE";
+    form.elements.is_active.value = "1";
+    await loadRequesterDirectory();
+    renderAll();
+    message.dataset.preserve = "";
+  } catch (error) {
+    message.textContent = error.message;
+  }
+}
+
+function startEditRequester(requesterId) {
+  state.editingRequesterId = Number(requesterId);
+  syncRequesterForm();
+  setActiveView("requester");
+}
+
+function syncRequesterForm() {
+  const form = document.getElementById("requesterForm");
+  const title = document.getElementById("requesterFormTitle");
+  const submitButton = document.getElementById("requesterSubmitBtn");
+  const cancelButton = document.getElementById("requesterCancelBtn");
+  const resetButton = document.getElementById("requesterResetBtn");
+  const message = document.getElementById("requesterMessage");
+  const requester = state.requesters.find((item) => Number(item.id) === state.editingRequesterId);
+
+  if (!requester) {
+    title.textContent = "新增/編輯使用者";
+    submitButton.textContent = "新增使用者";
+    cancelButton.hidden = true;
+    resetButton.textContent = "清空";
+    form.elements.requester_id.value = "";
+    form.elements.name.value = "";
+    form.elements.email.value = "";
+    form.elements.department.value = "PQE";
+    form.elements.is_active.value = "1";
+    if (!message.dataset.preserve) {
+      message.textContent = "";
+    }
+    return;
+  }
+
+  title.textContent = `編輯使用者：${requester.name}`;
+  submitButton.textContent = "儲存變更";
+  cancelButton.hidden = false;
+  resetButton.textContent = "回復內容";
+  form.elements.requester_id.value = String(requester.id);
+  form.elements.name.value = requester.name;
+  form.elements.email.value = requester.email;
+  form.elements.department.value = requester.department || "PQE";
+  form.elements.is_active.value = requester.is_active ? "1" : "0";
+  message.textContent = "";
+}
+
+function resetRequesterForm() {
+  if (state.editingRequesterId) {
+    syncRequesterForm();
+    return;
+  }
+  state.editingRequesterId = null;
+  document.getElementById("requesterMessage").dataset.preserve = "";
+  syncRequesterForm();
+}
+
+function cancelRequesterEdit() {
+  state.editingRequesterId = null;
+  const message = document.getElementById("requesterMessage");
+  message.dataset.preserve = "";
+  message.textContent = "已取消編輯。";
+  syncRequesterForm();
+}
+
+async function deleteRequester(requesterId) {
+  assertClientReady();
+
+  const requester = state.requesters.find((item) => Number(item.id) === Number(requesterId));
+  if (!requester) return;
+
+  const confirmed = window.confirm(`確定要刪除使用者「${requester.name}」嗎？`);
+  if (!confirmed) return;
+
+  try {
+    const { error } = await state.client
+      .from("requester_directory")
+      .update({ is_active: false })
+      .eq("id", requesterId);
+
+    assertNoError(error, "使用者刪除失敗");
+
+    if (state.editingRequesterId === Number(requesterId)) {
+      state.editingRequesterId = null;
+    }
+
+    document.getElementById("requesterMessage").textContent = "使用者已刪除。";
     await loadRequesterDirectory();
     renderAll();
   } catch (error) {
-    message.textContent = error.message;
+    document.getElementById("requesterMessage").textContent = error.message;
   }
 }
 
@@ -831,6 +956,7 @@ function handleRequesterLookup(event) {
     ? []
     : state.requesters
       .filter((item) => {
+        if (!item.is_active) return false;
         const haystack = `${item.name} ${item.email} ${item.department || ""}`.toLowerCase();
         return haystack.includes(query);
       })

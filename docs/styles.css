@@ -460,6 +460,10 @@ button.ghost {
   box-shadow: 0 14px 28px rgba(15, 23, 42, 0.12);
 }
 
+.typeahead-menu[hidden] {
+  display: none !important;
+}
+
 .typeahead-option {
   min-height: 0;
   padding: 8px 10px;

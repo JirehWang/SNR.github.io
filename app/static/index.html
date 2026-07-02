@@ -235,11 +235,12 @@
           <aside class="panel section-panel admin-panel" aria-label="新增使用者">
             <div class="section-title">
               <div>
-                <h2>新增使用者</h2>
+                <h2 id="requesterFormTitle">新增/編輯使用者</h2>
                 <p>新增後會直接寫入同一張 `requester_directory` 資料表。</p>
               </div>
             </div>
             <form id="requesterForm" class="form-grid compact">
+              <input type="hidden" name="requester_id">
               <label>
                 姓名
                 <input name="name" required placeholder="例如：Hank.Wu(吳金龍)">
@@ -252,8 +253,17 @@
                 部門
                 <input name="department" value="PQE" required>
               </label>
+              <label>
+                是否啟用
+                <select name="is_active">
+                  <option value="1">啟用</option>
+                  <option value="0">停用</option>
+                </select>
+              </label>
               <div class="form-actions wide">
-                <button type="submit" class="secondary">新增使用者</button>
+                <button type="submit" id="requesterSubmitBtn" class="secondary">新增使用者</button>
+                <button type="button" id="requesterCancelBtn" class="ghost" hidden>取消編輯</button>
+                <button type="button" id="requesterResetBtn" class="ghost">清空</button>
                 <span id="requesterMessage" role="status"></span>
               </div>
             </form>

@@ -10,7 +10,7 @@ create table if not exists public.requester_directory (
 
 alter table public.requester_directory enable row level security;
 
-grant select, insert on table public.requester_directory to anon, authenticated;
+grant select, insert, update on table public.requester_directory to anon, authenticated;
 grant usage, select on sequence public.requester_directory_id_seq to anon, authenticated;
 
 drop policy if exists "requester_directory_public_read" on public.requester_directory;
@@ -25,6 +25,14 @@ create policy "requester_directory_public_insert"
 on public.requester_directory
 for insert
 to anon, authenticated
+with check (true);
+
+drop policy if exists "requester_directory_public_update" on public.requester_directory;
+create policy "requester_directory_public_update"
+on public.requester_directory
+for update
+to anon, authenticated
+using (true)
 with check (true);
 
 insert into public.requester_directory (name, email, department, sort_order)
