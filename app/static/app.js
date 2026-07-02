@@ -15,7 +15,15 @@ const state = {
     requester_name: [],
     requester_email: [],
   },
+  bulletinScroll: {
+    intervalSeconds: 30,
+    durationSeconds: 6,
+    timerId: null,
+    direction: "down",
+  },
 };
+
+const AUTO_REFRESH_MS = 60000;
 
 const statusText = {
   available: "可預約",
@@ -33,16 +41,29 @@ const dayNames = ["週日", "週一", "週二", "週三", "週四", "週五", "�
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
+  hydrateViewFromLocation();
   initializeSupabase();
+  initializeBulletinControls();
   setDefaultTimes();
   renderAll();
   await connectAndLoad();
+  window.setInterval(() => {
+    if (state.client) {
+      connectAndLoad();
+    }
+  }, AUTO_REFRESH_MS);
 });
 
 function bindEvents() {
   document.getElementById("refreshBtn").addEventListener("click", () => connectAndLoad(true));
   document.getElementById("prevWeek").addEventListener("click", () => moveWeek(-7));
   document.getElementById("nextWeek").addEventListener("click", () => moveWeek(7));
+  document.getElementById("bulletinPrevWeek").addEventListener("click", () => moveWeek(-7));
+  document.getElementById("bulletinNextWeek").addEventListener("click", () => moveWeek(7));
+  document.getElementById("bulletinFullscreenBtn").addEventListener("click", openBulletinFullscreen);
+  document.getElementById("openBulletinWindowBtn").addEventListener("click", openBulletinWindow);
+  document.getElementById("bulletinScrollInterval").addEventListener("change", updateBulletinScrollSettings);
+  document.getElementById("bulletinScrollDuration").addEventListener("change", updateBulletinScrollSettings);
   document.getElementById("reservationForm").addEventListener("submit", submitReservation);
   document.getElementById("equipmentForm").addEventListener("submit", submitEquipment);
   document.getElementById("requesterForm").addEventListener("submit", submitRequester);
@@ -58,6 +79,23 @@ function bindEvents() {
   document.querySelectorAll("[data-view-target]").forEach((button) => {
     button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
   });
+}
+
+function hydrateViewFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  const requestedView = params.get("view");
+  if (requestedView && ["reservation", "equipment", "requester", "bulletin"].includes(requestedView)) {
+    state.activeView = requestedView;
+  }
+}
+
+function initializeBulletinControls() {
+  const intervalInput = document.getElementById("bulletinScrollInterval");
+  const durationInput = document.getElementById("bulletinScrollDuration");
+  if (!intervalInput || !durationInput) return;
+
+  intervalInput.value = String(state.bulletinScroll.intervalSeconds);
+  durationInput.value = String(state.bulletinScroll.durationSeconds);
 }
 
 function initializeSupabase() {
@@ -205,6 +243,7 @@ function renderAll() {
   renderRequesterSummary();
   renderEquipmentSummary();
   renderGantt();
+  renderBulletinBoard();
   renderReservationRows();
   renderViewState();
   renderConnectionState();
@@ -286,6 +325,9 @@ function renderNotice(message, level = "info") {
 
 function setActiveView(viewName) {
   state.activeView = viewName;
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", viewName);
+  window.history.replaceState({}, "", url);
   renderViewState();
 }
 
@@ -455,18 +497,44 @@ function cancelEquipmentEdit() {
 }
 
 function renderGantt() {
-  const scale = document.getElementById("ganttScale");
-  const chart = document.getElementById("ganttChart");
-  document.getElementById("weekLabel").textContent = `${formatDate(state.weekStart)} - ${formatDate(addDays(state.weekStart, 6))}`;
+  renderGanttSurface({
+    scaleId: "ganttScale",
+    chartId: "ganttChart",
+    labelId: "weekLabel",
+    variant: "default",
+  });
+}
+
+function renderBulletinBoard() {
+  renderGanttSurface({
+    scaleId: "bulletinScale",
+    chartId: "bulletinChart",
+    labelId: "bulletinWeekLabel",
+    variant: "bulletin",
+  });
+  const stamp = document.getElementById("bulletinTimestamp");
+  if (stamp) {
+    stamp.textContent = `更新時間 ${new Date().toLocaleString("zh-TW")}`;
+  }
+  scheduleBulletinAutoScroll();
+}
+
+function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
+  const scale = document.getElementById(scaleId);
+  const chart = document.getElementById(chartId);
+  const labelNode = document.getElementById(labelId);
+  if (labelNode) {
+    labelNode.textContent = `${formatDate(state.weekStart)} - ${formatDate(addDays(state.weekStart, 6))}`;
+  }
 
   if (!scale || !chart) return;
-  scale.innerHTML = '<div class="gantt-equipment-spacer">設備</div>';
+  scale.innerHTML = `<div class="gantt-equipment-spacer ${variant === "bulletin" ? "bulletin-cell" : ""}">設備</div>`;
   chart.innerHTML = "";
 
   for (let offset = 0; offset < 7; offset += 1) {
     const date = addDays(state.weekStart, offset);
     const tick = document.createElement("div");
-    tick.className = "gantt-day";
+    tick.className = `gantt-day${variant === "bulletin" ? " bulletin-cell" : ""}`;
     tick.textContent = `${dayNames[date.getDay()]} ${formatDate(date)}`;
     scale.appendChild(tick);
   }
@@ -478,17 +546,17 @@ function renderGantt() {
 
   state.equipment.forEach((equipment) => {
     const row = document.createElement("div");
-    row.className = "gantt-row";
+    row.className = `gantt-row${variant === "bulletin" ? " bulletin-row" : ""}`;
 
     const label = document.createElement("div");
-    label.className = "gantt-equipment-label";
+    label.className = `gantt-equipment-label${variant === "bulletin" ? " bulletin-cell" : ""}`;
     label.innerHTML = `
       <strong>${escapeHtml(equipment.name)}</strong>
       <span>${escapeHtml(equipment.category)} / ${escapeHtml(statusText[equipment.status] || equipment.status)}</span>
     `;
 
     const lane = document.createElement("div");
-    lane.className = "gantt-lane";
+    lane.className = `gantt-lane${variant === "bulletin" ? " bulletin-lane" : ""}`;
     if (equipment.status !== "available" || !equipment.is_active) {
       lane.classList.add("is-limited");
     }
@@ -501,7 +569,7 @@ function renderGantt() {
     reservations.forEach((reservation) => {
       const bar = document.createElement("button");
       bar.type = "button";
-      bar.className = "gantt-bar";
+      bar.className = `gantt-bar${variant === "bulletin" ? " bulletin-bar" : ""}`;
       bar.style.cssText = getGanttBarStyle(reservation);
       bar.title = `${reservation.equipment_name} / ${reservation.project_name} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
       bar.innerHTML = `
@@ -936,6 +1004,85 @@ function moveWeek(days) {
     return;
   }
   connectAndLoad();
+}
+
+function updateBulletinScrollSettings() {
+  const intervalInput = document.getElementById("bulletinScrollInterval");
+  const durationInput = document.getElementById("bulletinScrollDuration");
+  if (!intervalInput || !durationInput) return;
+
+  state.bulletinScroll.intervalSeconds = clampNumber(intervalInput.value, 5, 300, 30);
+  state.bulletinScroll.durationSeconds = clampNumber(durationInput.value, 1, 30, 6);
+  intervalInput.value = String(state.bulletinScroll.intervalSeconds);
+  durationInput.value = String(state.bulletinScroll.durationSeconds);
+  scheduleBulletinAutoScroll();
+}
+
+function scheduleBulletinAutoScroll() {
+  if (state.bulletinScroll.timerId) {
+    window.clearInterval(state.bulletinScroll.timerId);
+    state.bulletinScroll.timerId = null;
+  }
+
+  const wrap = document.querySelector(".bulletin-wrap");
+  if (!wrap) return;
+
+  const overflow = wrap.scrollHeight - wrap.clientHeight;
+  if (overflow <= 8) {
+    wrap.scrollTo({ top: 0, behavior: "auto" });
+    state.bulletinScroll.direction = "down";
+    return;
+  }
+
+  wrap.scrollTo({ top: 0, behavior: "auto" });
+  state.bulletinScroll.direction = "down";
+  state.bulletinScroll.timerId = window.setInterval(() => {
+    stepBulletinAutoScroll();
+  }, state.bulletinScroll.intervalSeconds * 1000);
+}
+
+function stepBulletinAutoScroll() {
+  const wrap = document.querySelector(".bulletin-wrap");
+  if (!wrap) return;
+
+  const maxTop = Math.max(wrap.scrollHeight - wrap.clientHeight, 0);
+  if (maxTop <= 8) {
+    wrap.scrollTo({ top: 0, behavior: "auto" });
+    state.bulletinScroll.direction = "down";
+    return;
+  }
+
+  const targetTop = state.bulletinScroll.direction === "down" ? maxTop : 0;
+  wrap.style.scrollBehavior = "smooth";
+  wrap.scrollTo({ top: targetTop, behavior: "smooth" });
+  window.setTimeout(() => {
+    wrap.style.scrollBehavior = "";
+  }, state.bulletinScroll.durationSeconds * 1000);
+  state.bulletinScroll.direction = state.bulletinScroll.direction === "down" ? "up" : "down";
+}
+
+function openBulletinWindow() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", "bulletin");
+  window.open(url.toString(), "_blank", "noopener,noreferrer");
+}
+
+async function openBulletinFullscreen() {
+  const board = document.getElementById("bulletinBoard");
+  if (!board) return;
+
+  if (!document.fullscreenElement) {
+    await board.requestFullscreen();
+    return;
+  }
+
+  await document.exitFullscreen();
+}
+
+function clampNumber(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
 }
 
 function setDefaultTimes() {

@@ -292,6 +292,27 @@ button.ghost {
   white-space: nowrap;
 }
 
+.bulletin-panel {
+  padding: 24px;
+}
+
+.bulletin-meta {
+  margin: -4px 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bulletin-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.bulletin-controls label {
+  min-width: 150px;
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -611,6 +632,11 @@ textarea:focus {
   background: #fff;
 }
 
+.bulletin-wrap {
+  min-height: 70vh;
+  overflow-y: auto;
+}
+
 .gantt-scale {
   position: sticky;
   top: 0;
@@ -633,11 +659,21 @@ textarea:focus {
   font-size: 14px;
 }
 
+.bulletin-scale,
+.bulletin-chart,
+.bulletin-wrap .gantt-placeholder {
+  min-width: 1320px;
+}
+
 .gantt-row {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 76px;
   border-bottom: 1px solid var(--line);
+}
+
+.bulletin-row {
+  min-height: 108px;
 }
 
 .gantt-row:last-child {
@@ -701,6 +737,10 @@ textarea:focus {
   background-color: #fff7ed;
 }
 
+.bulletin-lane {
+  min-height: 108px;
+}
+
 .gantt-bar {
   position: absolute;
   top: 10px;
@@ -719,6 +759,12 @@ textarea:focus {
 
 .gantt-bar:hover {
   background: #1d4ed8;
+}
+
+.bulletin-bar {
+  top: 14px;
+  height: 78px;
+  padding: 10px 12px;
 }
 
 .gantt-bar strong,
@@ -743,6 +789,18 @@ textarea:focus {
   font-size: 10px;
   color: #bfdbfe;
   font-style: normal;
+}
+
+.bulletin-bar strong {
+  font-size: 16px;
+}
+
+.bulletin-bar span {
+  font-size: 14px;
+}
+
+.bulletin-bar em {
+  font-size: 12px;
 }
 
 .gantt-empty {
@@ -829,6 +887,18 @@ td:nth-child(6) {
 
 .muted {
   color: var(--muted);
+}
+
+:fullscreen .bulletin-panel {
+  min-height: 100vh;
+  border-radius: 0;
+  border: 0;
+  padding: 24px;
+  background: #f8fbff;
+}
+
+:fullscreen .bulletin-wrap {
+  min-height: calc(100vh - 140px);
 }
 
 @media (max-width: 1080px) {
