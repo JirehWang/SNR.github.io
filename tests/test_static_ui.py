@@ -27,8 +27,18 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn('id="ganttScale"', html)
         self.assertIn("function renderGantt()", js)
         self.assertIn("function getGanttBarStyle", js)
+        self.assertIn("project_name", js)
         self.assertIn(".gantt-chart", css)
         self.assertIn(".gantt-bar", css)
+
+    def test_reservation_form_has_project_name_and_no_week_schedule_panel(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('name="project_name"', html)
+        self.assertIn("project_name: payload.project_name.trim()", js)
+        self.assertNotIn('id="scheduleBoard"', html)
+        self.assertNotIn("function renderWeek()", js)
 
     def test_legacy_excel_and_local_api_ui_is_removed(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
@@ -54,7 +64,7 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn("function syncEquipmentForm", js)
         self.assertIn("function cancelEquipmentEdit", js)
         self.assertIn("function equipmentMatchesPayload", js)
-        self.assertIn('.validation = "驗證中"', js)
+        self.assertIn('statusText.validation = "驗證中"', js)
         self.assertIn(".metrics-grid", css)
         self.assertIn(".workspace-tab", css)
         self.assertIn(".equipment-card-actions", css)

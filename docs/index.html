@@ -11,7 +11,7 @@
     <div class="header-copy">
       <p class="eyebrow">Reliability Lab Reservation</p>
       <h1>可靠度實驗室設備預約系統</h1>
-      <p>全託管 MVP，直接以 Supabase 作為雲端資料庫與資料 API。</p>
+      <p>全託管 MVP，使用 Supabase 管理設備、預約與歷程資料。</p>
     </div>
     <div class="header-actions">
       <div id="connectionBadge" class="status-pill disconnected">未連線</div>
@@ -24,7 +24,7 @@
       <div class="section-title section-stack">
         <div>
           <h2>雲端連線設定</h2>
-          <p>輸入 Supabase Project URL 與 anon key 後，這個靜態網站就能直接讀寫雲端資料。</p>
+          <p>輸入 Supabase Project URL 與 anon key 後，前端就會直接讀寫雲端資料。</p>
         </div>
       </div>
       <form id="supabaseConfigForm" class="config-grid">
@@ -46,7 +46,7 @@
     </section>
 
     <section id="runtimeNotice" class="notice" aria-label="系統狀態">
-      先完成雲端連線設定，之後設備資料、預約資料、狀態修改都會直接寫入 Supabase。
+      先完成雲端連線設定，之後設備資料、預約資料與狀態修改都會直接寫入 Supabase。
     </section>
 
     <section class="panel dashboard-panel" aria-label="Dashboard">
@@ -68,26 +68,16 @@
       <div class="workspace-view active" data-view="reservation">
         <div class="split-layout reservation-layout">
           <div class="main-column">
-            <section class="panel section-panel schedule-panel" aria-label="每週排程">
+            <section class="panel section-panel gantt-panel" aria-label="設備使用狀況">
               <div class="section-title with-controls">
                 <div>
-                  <h2>每週排程</h2>
-                  <p>以日曆欄檢視本週各日的設備預約。</p>
+                  <h2>設備使用狀況</h2>
+                  <p>用甘特圖檢視本週設備使用者、專案名稱與時段安排。</p>
                 </div>
                 <div class="week-controls">
                   <button id="prevWeek" class="icon-btn" title="上一週" aria-label="上一週">&#8249;</button>
                   <span id="weekLabel"></span>
                   <button id="nextWeek" class="icon-btn" title="下一週" aria-label="下一週">&#8250;</button>
-                </div>
-              </div>
-              <div id="scheduleBoard" class="schedule-board"></div>
-            </section>
-
-            <section class="panel section-panel gantt-panel" aria-label="設備使用狀況">
-              <div class="section-title">
-                <div>
-                  <h2>設備使用狀況</h2>
-                  <p>依設備橫向檢視本週預約分布與狀態限制。</p>
                 </div>
               </div>
               <div class="gantt-wrap">
@@ -110,7 +100,7 @@
                       <th>設備</th>
                       <th>時間</th>
                       <th>申請人</th>
-                      <th>用途</th>
+                      <th>專案 / 用途</th>
                       <th>狀態</th>
                       <th>操作</th>
                     </tr>
@@ -126,7 +116,7 @@
               <div class="section-title">
                 <div>
                   <h2>新增預約</h2>
-                  <p>建立部門內設備使用申請。</p>
+                  <p>建立設備使用申請，並帶入專案名稱供甘特圖識別。</p>
                 </div>
               </div>
               <form id="reservationForm" class="form-grid">
@@ -146,6 +136,10 @@
                   部門
                   <input name="department" required value="可靠度實驗室">
                 </label>
+                <label class="wide">
+                  專案名稱
+                  <input name="project_name" required placeholder="例如：SNR-MVP / 客戶案號 / EVT-01">
+                </label>
                 <label>
                   開始時間
                   <input name="start_time" type="datetime-local" required>
@@ -157,7 +151,7 @@
                 <label class="wide">
                   使用目的
                   <select name="purpose" required>
-                    <option value="可靠度測試">可靠度測試</option>
+                    <option value="可靠度驗證">可靠度驗證</option>
                     <option value="驗證實驗">驗證實驗</option>
                     <option value="樣品試產">樣品試產</option>
                     <option value="教育訓練">教育訓練</option>
@@ -243,13 +237,6 @@
       </div>
     </section>
   </main>
-
-  <template id="dayTemplate">
-    <article class="day-column">
-      <h3></h3>
-      <div class="day-events"></div>
-    </article>
-  </template>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./app.js"></script>

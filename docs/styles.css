@@ -646,10 +646,10 @@ textarea:focus {
 
 .gantt-bar {
   position: absolute;
-  top: 17px;
+  top: 10px;
   min-width: 56px;
   max-width: calc(100% - 4px);
-  height: 42px;
+  height: 56px;
   overflow: hidden;
   border: 1px solid #1d4ed8;
   border-radius: 6px;
@@ -665,7 +665,8 @@ textarea:focus {
 }
 
 .gantt-bar strong,
-.gantt-bar span {
+.gantt-bar span,
+.gantt-bar em {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -679,6 +680,12 @@ textarea:focus {
 .gantt-bar span {
   font-size: 11px;
   color: #dbeafe;
+}
+
+.gantt-bar em {
+  font-size: 10px;
+  color: #bfdbfe;
+  font-style: normal;
 }
 
 .gantt-empty {

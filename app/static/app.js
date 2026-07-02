@@ -8,7 +8,6 @@ const state = {
   weekStart: startOfWeek(new Date()),
   activeView: "reservation",
   editingEquipmentId: null,
-  loading: false,
 };
 
 const statusText = {
@@ -149,7 +148,6 @@ async function connectAndLoad(forceRefresh = false) {
     return;
   }
 
-  state.loading = true;
   renderConnectionState("connecting");
   if (forceRefresh) {
     renderNotice("正在重新同步雲端資料...", "info");
@@ -164,7 +162,6 @@ async function connectAndLoad(forceRefresh = false) {
     renderConnectionState("disconnected");
     renderNotice(error.message, "error");
   } finally {
-    state.loading = false;
     renderAll();
   }
 }
@@ -197,6 +194,7 @@ async function loadReservations() {
       requester_name,
       requester_email,
       department,
+      project_name,
       purpose,
       start_time,
       end_time,
@@ -230,7 +228,6 @@ function renderAll() {
   renderDashboardMetrics();
   renderEquipmentOptions();
   renderEquipmentSummary();
-  renderWeek();
   renderGantt();
   renderReservationRows();
   renderViewState();
@@ -245,13 +242,11 @@ function renderConnectionState(forcedState = null) {
   badge.className = `status-pill ${mode}`;
   if (mode === "connecting") {
     badge.textContent = "連線中";
-    return;
-  }
-  if (mode === "connected") {
+  } else if (mode === "connected") {
     badge.textContent = "雲端已連線";
-    return;
+  } else {
+    badge.textContent = "未連線";
   }
-  badge.textContent = "未連線";
 }
 
 function renderNotice(message, level = "info") {
@@ -430,49 +425,12 @@ function cancelEquipmentEdit() {
   syncEquipmentForm();
 }
 
-function renderWeek() {
-  const board = document.getElementById("scheduleBoard");
-  const template = document.getElementById("dayTemplate");
-  const weekEnd = addDays(state.weekStart, 6);
-  document.getElementById("weekLabel").textContent = `${formatDate(state.weekStart)} - ${formatDate(weekEnd)}`;
-  board.innerHTML = "";
-
-  for (let offset = 0; offset < 7; offset += 1) {
-    const date = addDays(state.weekStart, offset);
-    const node = template.content.firstElementChild.cloneNode(true);
-    node.querySelector("h3").textContent = `${dayNames[date.getDay()]} ${formatDate(date)}`;
-    const events = state.reservations.filter((reservation) => sameDate(new Date(reservation.start_time), date));
-    const eventRoot = node.querySelector(".day-events");
-
-    if (events.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "empty-day";
-      empty.textContent = "尚無預約";
-      eventRoot.appendChild(empty);
-    } else {
-      events.forEach((reservation) => eventRoot.appendChild(renderEventCard(reservation)));
-    }
-
-    board.appendChild(node);
-  }
-}
-
-function renderEventCard(reservation) {
-  const card = document.createElement("div");
-  card.className = `event-card ${reservation.status === "cancelled" ? "cancelled" : ""}`;
-  card.innerHTML = `
-    <strong>${escapeHtml(reservation.equipment_name)}</strong>
-    <span>${formatTime(reservation.start_time)} - ${formatTime(reservation.end_time)}</span>
-    <span>${escapeHtml(reservation.requester_name)} / ${escapeHtml(reservation.purpose)}</span>
-  `;
-  return card;
-}
-
 function renderGantt() {
   const scale = document.getElementById("ganttScale");
   const chart = document.getElementById("ganttChart");
-  if (!scale || !chart) return;
+  document.getElementById("weekLabel").textContent = `${formatDate(state.weekStart)} - ${formatDate(addDays(state.weekStart, 6))}`;
 
+  if (!scale || !chart) return;
   scale.innerHTML = '<div class="gantt-equipment-spacer">設備</div>';
   chart.innerHTML = "";
 
@@ -507,8 +465,8 @@ function renderGantt() {
     }
 
     const reservations = state.reservations.filter((reservation) =>
-      Number(reservation.equipment_id) === Number(equipment.id)
-      && reservation.status !== "cancelled"
+      Number(reservation.equipment_id) === Number(equipment.id) &&
+      reservation.status !== "cancelled"
     );
 
     reservations.forEach((reservation) => {
@@ -516,10 +474,11 @@ function renderGantt() {
       bar.type = "button";
       bar.className = "gantt-bar";
       bar.style.cssText = getGanttBarStyle(reservation);
-      bar.title = `${reservation.equipment_name} ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
+      bar.title = `${reservation.equipment_name} / ${reservation.project_name} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
       bar.innerHTML = `
         <strong>${escapeHtml(reservation.requester_name)}</strong>
-        <span>${formatTime(reservation.start_time)}-${formatTime(reservation.end_time)}</span>
+        <span>${escapeHtml(reservation.project_name || "未填專案名稱")}</span>
+        <em>${formatTime(reservation.start_time)}-${formatTime(reservation.end_time)}</em>
       `;
       lane.appendChild(bar);
     });
@@ -546,7 +505,7 @@ function getGanttBarStyle(reservation) {
   const clampedEnd = Math.min(reservationEnd, weekEnd);
   const total = weekEnd - weekStart;
   const left = ((clampedStart - weekStart) / total) * 100;
-  const width = Math.max(((clampedEnd - clampedStart) / total) * 100, 1.2);
+  const width = Math.max(((clampedEnd - clampedStart) / total) * 100, 1.4);
   return `left: ${left.toFixed(3)}%; width: ${width.toFixed(3)}%;`;
 }
 
@@ -567,7 +526,7 @@ function renderReservationRows() {
       <td>${escapeHtml(reservation.equipment_name)}</td>
       <td>${formatDateTime(reservation.start_time)}<br>${formatDateTime(reservation.end_time)}</td>
       <td>${escapeHtml(reservation.requester_name)}<br><span class="muted">${escapeHtml(reservation.department)}</span></td>
-      <td>${escapeHtml(reservation.purpose)}</td>
+      <td>${escapeHtml(reservation.project_name)}<br><span class="muted">${escapeHtml(reservation.purpose)}</span></td>
       <td><span class="badge ${escapeHtml(reservation.status)}">${escapeHtml(statusText[reservation.status] || reservation.status)}</span></td>
       <td class="row-actions"></td>
     `;
@@ -601,6 +560,10 @@ async function submitReservation(event) {
     message.textContent = "請先建立可預約設備。";
     return;
   }
+  if (!payload.project_name?.trim()) {
+    message.textContent = "請輸入專案名稱。";
+    return;
+  }
   if (new Date(endIso) <= new Date(startIso)) {
     message.textContent = "結束時間必須晚於開始時間。";
     return;
@@ -631,6 +594,7 @@ async function submitReservation(event) {
       requester_name: payload.requester_name.trim(),
       requester_email: payload.requester_email.trim(),
       department: payload.department.trim(),
+      project_name: payload.project_name.trim(),
       purpose: payload.purpose.trim(),
       start_time: startIso,
       end_time: endIso,
@@ -656,7 +620,7 @@ async function submitReservation(event) {
         changed_by_name: payload.requester_name.trim(),
       });
 
-    assertNoError(historyError, "預約紀錄寫入失敗");
+    assertNoError(historyError, "預約歷程寫入失敗");
 
     message.textContent = "預約已建立。";
     form.reset();
@@ -700,16 +664,12 @@ async function submitEquipment(event) {
   }
 
   try {
-    let saved = null;
     if (equipmentId) {
-      const { data, error } = await state.client
+      const { error } = await state.client
         .from("equipment")
         .update(row)
-        .eq("id", equipmentId)
-        .select()
-        .single();
+        .eq("id", equipmentId);
       assertNoError(error, "設備更新失敗");
-      saved = data;
       message.textContent = "設備資料已更新。";
       state.editingEquipmentId = equipmentId;
     } else {
@@ -719,21 +679,12 @@ async function submitEquipment(event) {
         .select()
         .single();
       assertNoError(error, "設備建立失敗");
-      saved = data;
       message.textContent = "設備已新增。";
-      state.editingEquipmentId = Number(saved.id);
+      state.editingEquipmentId = Number(data.id);
     }
 
     message.dataset.preserve = "true";
     await loadEquipment();
-
-    if (equipmentId) {
-      const updated = state.equipment.find((item) => item.id === equipmentId);
-      if (!updated || !equipmentMatchesPayload(updated, row)) {
-        throw new Error("設備資料尚未反映到目前雲端狀態，請重新整理後再試一次。");
-      }
-    }
-
     renderAll();
     message.dataset.preserve = "";
   } catch (error) {
@@ -762,19 +713,14 @@ async function cancelReservation(reservation) {
       .select("*")
       .eq("id", reservation.id)
       .single();
-
     assertNoError(loadError, "預約資料讀取失敗");
 
     const { data: updated, error: updateError } = await state.client
       .from("reservations")
-      .update({
-        status: "cancelled",
-        cancel_reason: reason,
-      })
+      .update({ status: "cancelled", cancel_reason: reason })
       .eq("id", reservation.id)
       .select()
       .single();
-
     assertNoError(updateError, "取消預約失敗");
 
     const { error: historyError } = await state.client
@@ -786,8 +732,8 @@ async function cancelReservation(reservation) {
         new_value: updated,
         changed_by_name: reservation.requester_name,
       });
+    assertNoError(historyError, "預約歷程寫入失敗");
 
-    assertNoError(historyError, "預約取消紀錄寫入失敗");
     await loadReservations();
     renderAll();
   } catch (error) {
@@ -812,7 +758,6 @@ function moveWeek(days) {
     renderAll();
     return;
   }
-
   connectAndLoad();
 }
 
@@ -843,12 +788,6 @@ function addHours(date, hours) {
   const value = new Date(date);
   value.setHours(value.getHours() + hours);
   return value;
-}
-
-function sameDate(left, right) {
-  return left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate();
 }
 
 function toDateTimeInput(date) {

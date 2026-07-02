@@ -3,7 +3,7 @@ import json
 import sqlite3
 import threading
 from datetime import datetime
-from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -48,6 +48,7 @@ class App:
                     requester_name TEXT NOT NULL,
                     requester_email TEXT NOT NULL,
                     department TEXT NOT NULL,
+                    project_name TEXT NOT NULL DEFAULT '',
                     purpose TEXT NOT NULL,
                     start_time TEXT NOT NULL,
                     end_time TEXT NOT NULL,
@@ -72,9 +73,10 @@ class App:
                     changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (reservation_id) REFERENCES reservations(id)
                 );
-
                 """
             )
+            self.ensure_column(conn, "reservations", "project_name", "TEXT NOT NULL DEFAULT ''")
+
             count = conn.execute("SELECT COUNT(*) AS count FROM equipment").fetchone()["count"]
             if count == 0:
                 conn.executemany(
@@ -89,6 +91,15 @@ class App:
                         ("Vibration Table", "VIBRATION", "可靠度實驗室 2F", "maintenance", 1),
                     ],
                 )
+
+    @staticmethod
+    def ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str):
+        columns = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
     def start_for_tests(self):
         server = TestServer(self)
@@ -302,6 +313,7 @@ class Handler(SimpleHTTPRequestHandler):
             "requester_name",
             "requester_email",
             "department",
+            "project_name",
             "purpose",
             "start_time",
             "end_time",
@@ -322,7 +334,7 @@ class Handler(SimpleHTTPRequestHandler):
             ).fetchone()
             if equipment is None:
                 raise ApiError(404, "Equipment not found")
-            if equipment["status"] not in ("available", "reserved"):
+            if equipment["status"] != "available":
                 raise ApiError(409, "Equipment is not available for booking")
             conflict = find_conflict(conn, equipment_id, data["start_time"], data["end_time"])
             if conflict:
@@ -331,16 +343,17 @@ class Handler(SimpleHTTPRequestHandler):
             cursor = conn.execute(
                 """
                 INSERT INTO reservations (
-                    equipment_id, requester_name, requester_email, department, purpose,
+                    equipment_id, requester_name, requester_email, department, project_name, purpose,
                     start_time, end_time, status, approval_status, notes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'reserved', 'not_required', ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reserved', 'not_required', ?)
                 """,
                 (
                     equipment_id,
                     data["requester_name"].strip(),
                     data["requester_email"].strip(),
                     data["department"].strip(),
+                    data["project_name"].strip(),
                     data["purpose"].strip(),
                     data["start_time"],
                     data["end_time"],
@@ -381,11 +394,12 @@ class Handler(SimpleHTTPRequestHandler):
             conn.execute(
                 """
                 UPDATE reservations
-                SET start_time = ?, end_time = ?, status = ?, notes = ?, cancel_reason = ?,
+                SET project_name = ?, start_time = ?, end_time = ?, status = ?, notes = ?, cancel_reason = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (
+                    data.get("project_name", current["project_name"]),
                     new_start,
                     new_end,
                     new_status,
@@ -410,6 +424,7 @@ class Handler(SimpleHTTPRequestHandler):
                 ),
             )
         self.send_json({"reservation": row_to_dict(updated)})
+
 
 def get_reservation(conn: sqlite3.Connection, reservation_id: int):
     return conn.execute(
@@ -440,7 +455,7 @@ def find_conflict(
         SELECT id, requester_name, start_time, end_time
         FROM reservations
         WHERE equipment_id = ?
-          AND status NOT IN ('cancelled')
+          AND status <> 'cancelled'
           AND start_time < ?
           AND end_time > ?
           {exclude}

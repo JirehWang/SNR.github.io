@@ -43,7 +43,7 @@ class ApiTestCase(unittest.TestCase):
             "/api/equipment/1",
             {
                 "name": "環境箱 A-1",
-                "category": "環測",
+                "category": "TEMP",
                 "location": "可靠度實驗室 3F",
                 "capacity": 3,
                 "status": "validation",
@@ -73,15 +73,17 @@ class ApiTestCase(unittest.TestCase):
             "requester_name": "王小明",
             "requester_email": "ming@example.com",
             "department": "可靠度實驗室",
+            "project_name": "SNR-MVP",
             "purpose": "可靠度驗證",
             "start_time": "2026-07-02T09:00",
             "end_time": "2026-07-02T11:00",
-            "notes": "MVP 測試",
+            "notes": "MVP 驗證",
         }
 
         status, created = self.request("POST", "/api/reservations", payload)
         self.assertEqual(status, 201)
         self.assertEqual(created["reservation"]["status"], "reserved")
+        self.assertEqual(created["reservation"]["project_name"], "SNR-MVP")
 
         with self.assertRaises(HTTPError) as ctx:
             self.request(
@@ -101,7 +103,7 @@ class ApiTestCase(unittest.TestCase):
         status, updated = self.request(
             "PATCH",
             f"/api/reservations/{reservation_id}",
-            {"status": "cancelled", "cancel_reason": "測試取消", "changed_by": "王小明"},
+            {"status": "cancelled", "cancel_reason": "時程變更", "changed_by": "王小明"},
         )
         self.assertEqual(status, 200)
         self.assertEqual(updated["reservation"]["status"], "cancelled")
