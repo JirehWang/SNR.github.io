@@ -11,7 +11,8 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
-DEFAULT_DB = ROOT.parent / "data" / "rlab_reservation.db"
+WORKSPACE_ROOT = ROOT.parents[2] if ROOT.parents[1].name == "work" else ROOT.parents[1]
+DEFAULT_DB = WORKSPACE_ROOT / "data" / "rlab_reservation.db"
 
 
 class App:
@@ -119,6 +120,14 @@ class ApiError(Exception):
         self.message = message
 
 
+def normalize_status(value: str):
+    status = str(value or "").strip()
+    allowed_statuses = {"available", "validation", "maintenance", "offline"}
+    if status not in allowed_statuses:
+        raise ApiError(400, "status must be available, validation, maintenance, or offline")
+    return status
+
+
 class Handler(SimpleHTTPRequestHandler):
     app: App
 
@@ -205,18 +214,21 @@ class Handler(SimpleHTTPRequestHandler):
         capacity = int(data.get("capacity") or 1)
         if capacity < 1:
             raise ApiError(400, "capacity must be at least 1")
+        status = normalize_status(data.get("status", "available"))
+        is_active = 1 if int(data.get("is_active", 1)) else 0
         with self.app.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO equipment (name, category, location, status, capacity)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO equipment (name, category, location, status, capacity, is_active)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data["name"].strip(),
                     data["category"].strip(),
                     str(data.get("location", "")).strip(),
-                    str(data.get("status", "available")).strip() or "available",
+                    status,
                     capacity,
+                    is_active,
                 ),
             )
             row = conn.execute("SELECT * FROM equipment WHERE id = ?", (cursor.lastrowid,)).fetchone()
@@ -224,16 +236,30 @@ class Handler(SimpleHTTPRequestHandler):
 
     def update_equipment(self, equipment_id: int):
         data = self.read_json()
-        allowed_statuses = {"available", "maintenance", "offline"}
-        status = str(data.get("status", "")).strip()
-        if status not in allowed_statuses:
-            raise ApiError(400, "status must be available, maintenance, or offline")
-
         with self.app.connect() as conn:
             current = conn.execute("SELECT * FROM equipment WHERE id = ?", (equipment_id,)).fetchone()
             if current is None:
                 raise ApiError(404, "Equipment not found")
-            conn.execute("UPDATE equipment SET status = ? WHERE id = ?", (status, equipment_id))
+            name = str(data.get("name", current["name"])).strip()
+            category = str(data.get("category", current["category"])).strip()
+            location = str(data.get("location", current["location"])).strip()
+            status = normalize_status(data.get("status", current["status"]))
+            capacity = int(data.get("capacity", current["capacity"]) or 1)
+            is_active = 1 if int(data.get("is_active", current["is_active"])) else 0
+            if not name:
+                raise ApiError(400, "name is required")
+            if not category:
+                raise ApiError(400, "category is required")
+            if capacity < 1:
+                raise ApiError(400, "capacity must be at least 1")
+            conn.execute(
+                """
+                UPDATE equipment
+                SET name = ?, category = ?, location = ?, status = ?, capacity = ?, is_active = ?
+                WHERE id = ?
+                """,
+                (name, category, location, status, capacity, is_active, equipment_id),
+            )
             row = conn.execute(
                 """
                 SELECT id, name, category, location, status, capacity, is_active

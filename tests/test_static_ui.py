@@ -6,6 +6,18 @@ STATIC = Path(__file__).resolve().parents[1] / "app" / "static"
 
 
 class StaticUiTestCase(unittest.TestCase):
+    def test_supabase_hosted_mode_assets_are_present(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("@supabase/supabase-js@2", html)
+        self.assertIn('id="supabaseConfigForm"', html)
+        self.assertIn('id="supabaseUrl"', html)
+        self.assertIn('id="supabaseAnonKey"', html)
+        self.assertIn("function saveSupabaseConfig", js)
+        self.assertIn("function buildClient", js)
+        self.assertIn("window.supabase.createClient", js)
+
     def test_gantt_view_assets_are_present(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         js = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -18,24 +30,35 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn(".gantt-chart", css)
         self.assertIn(".gantt-bar", css)
 
-    def test_excel_download_ui_is_removed(self):
+    def test_legacy_excel_and_local_api_ui_is_removed(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
 
         self.assertNotIn("/api/export.xlsx", html)
-        self.assertNotIn("下載 Excel", html)
         self.assertNotIn("SharePoint Excel", html)
+        self.assertNotIn('fetch("/api/', js)
 
-    def test_dashboard_and_equipment_status_controls_are_present(self):
+    def test_dashboard_and_equipment_management_views_are_present(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         js = (STATIC / "app.js").read_text(encoding="utf-8")
         css = (STATIC / "styles.css").read_text(encoding="utf-8")
 
         self.assertIn('id="dashboardMetrics"', html)
+        self.assertIn('data-view="reservation"', html)
+        self.assertIn('data-view="equipment"', html)
+        self.assertIn('id="equipmentFormTitle"', html)
+        self.assertIn('id="equipmentCancelBtn"', html)
+        self.assertIn('option value="validation"', html)
         self.assertIn("function renderDashboardMetrics()", js)
-        self.assertIn("function updateEquipmentStatus", js)
-        self.assertIn("equipment-status-select", js)
+        self.assertIn("function startEditEquipment", js)
+        self.assertIn("function syncEquipmentForm", js)
+        self.assertIn("function cancelEquipmentEdit", js)
+        self.assertIn("function equipmentMatchesPayload", js)
+        self.assertIn('.validation = "驗證中"', js)
         self.assertIn(".metrics-grid", css)
-        self.assertIn(".equipment-status-select", css)
+        self.assertIn(".workspace-tab", css)
+        self.assertIn(".equipment-card-actions", css)
+        self.assertIn(".badge.validation", css)
 
 
 if __name__ == "__main__":

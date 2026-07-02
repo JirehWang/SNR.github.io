@@ -37,19 +37,31 @@ class ApiTestCase(unittest.TestCase):
         self.assertGreaterEqual(len(data["equipment"]), 3)
         self.assertEqual(data["equipment"][0]["capacity"], 1)
 
-    def test_equipment_status_can_be_updated(self):
+    def test_equipment_fields_can_be_updated(self):
         status, data = self.request(
             "PATCH",
             "/api/equipment/1",
-            {"status": "maintenance", "changed_by": "Lab Admin"},
+            {
+                "name": "環境箱 A-1",
+                "category": "環測",
+                "location": "可靠度實驗室 3F",
+                "capacity": 3,
+                "status": "validation",
+                "is_active": 0,
+            },
         )
 
         self.assertEqual(status, 200)
-        self.assertEqual(data["equipment"]["status"], "maintenance")
+        self.assertEqual(data["equipment"]["name"], "環境箱 A-1")
+        self.assertEqual(data["equipment"]["location"], "可靠度實驗室 3F")
+        self.assertEqual(data["equipment"]["capacity"], 3)
+        self.assertEqual(data["equipment"]["status"], "validation")
+        self.assertEqual(data["equipment"]["is_active"], 0)
 
         status, equipment = self.request("GET", "/api/equipment")
         updated = next(item for item in equipment["equipment"] if item["id"] == 1)
-        self.assertEqual(updated["status"], "maintenance")
+        self.assertEqual(updated["name"], "環境箱 A-1")
+        self.assertEqual(updated["status"], "validation")
 
         with self.assertRaises(HTTPError) as ctx:
             self.request("PATCH", "/api/equipment/1", {"status": "broken"})
