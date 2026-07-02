@@ -704,6 +704,7 @@ table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;
 }
 
 th,
@@ -720,8 +721,40 @@ th {
   font-size: 12px;
 }
 
+th:nth-child(1),
+td:nth-child(1) {
+  width: 16%;
+}
+
+th:nth-child(2),
+td:nth-child(2) {
+  width: 21%;
+}
+
+th:nth-child(3),
+td:nth-child(3) {
+  width: 18%;
+}
+
+th:nth-child(4),
+td:nth-child(4) {
+  width: 16%;
+}
+
+th:nth-child(5),
+td:nth-child(5) {
+  width: 16%;
+}
+
+th:nth-child(6),
+td:nth-child(6) {
+  width: 13%;
+}
+
 .row-actions {
   display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 8px;
 }
 
@@ -730,6 +763,7 @@ th {
   background: #fee2e2;
   color: var(--danger);
   padding: 6px 10px;
+  align-self: flex-start;
 }
 
 .danger-link:hover {
