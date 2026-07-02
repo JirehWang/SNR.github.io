@@ -20,33 +20,8 @@
   </header>
 
   <main class="layout">
-    <section class="panel config-panel" aria-label="Supabase 設定">
-      <div class="section-title section-stack">
-        <div>
-          <h2>雲端連線設定</h2>
-          <p>輸入 Supabase Project URL 與 anon key 後，前端就會直接讀寫雲端資料。</p>
-        </div>
-      </div>
-      <form id="supabaseConfigForm" class="config-grid">
-        <label>
-          Supabase URL
-          <input id="supabaseUrl" name="supabase_url" type="url" placeholder="https://your-project.supabase.co" required>
-        </label>
-        <label>
-          Supabase anon key
-          <input id="supabaseAnonKey" name="supabase_anon_key" type="password" placeholder="eyJ..." required>
-        </label>
-        <div class="form-actions wide">
-          <button type="submit">儲存並連線</button>
-          <button type="button" id="clearSupabaseConfigBtn" class="ghost">清除設定</button>
-          <span id="supabaseConfigMessage" role="status"></span>
-        </div>
-      </form>
-      <p class="support-copy">anon key 可從 Supabase Dashboard 的 Project Settings &gt; API 取得。</p>
-    </section>
-
     <section id="runtimeNotice" class="notice" aria-label="系統狀態">
-      先完成雲端連線設定，之後設備資料、預約資料與狀態修改都會直接寫入 Supabase。
+      正在初始化雲端連線，設備資料、預約資料與狀態修改都會直接寫入 Supabase。
     </section>
 
     <section class="panel dashboard-panel" aria-label="Dashboard">

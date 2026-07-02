@@ -11,10 +11,12 @@ class StaticUiTestCase(unittest.TestCase):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
 
         self.assertIn("@supabase/supabase-js@2", html)
-        self.assertIn('id="supabaseConfigForm"', html)
-        self.assertIn('id="supabaseUrl"', html)
-        self.assertIn('id="supabaseAnonKey"', html)
-        self.assertIn("function saveSupabaseConfig", js)
+        self.assertNotIn('id="supabaseConfigForm"', html)
+        self.assertNotIn('id="supabaseUrl"', html)
+        self.assertNotIn('id="supabaseAnonKey"', html)
+        self.assertIn('const SUPABASE_URL = "https://sbqqylrnjfrrqwrdiiun.supabase.co"', js)
+        self.assertIn("const SUPABASE_ANON_KEY =", js)
+        self.assertIn("function initializeSupabase()", js)
         self.assertIn("function buildClient", js)
         self.assertIn("window.supabase.createClient", js)
 

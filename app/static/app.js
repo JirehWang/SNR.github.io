@@ -1,4 +1,5 @@
-const SUPABASE_CONFIG_KEY = "rlab-supabase-config";
+const SUPABASE_URL = "https://sbqqylrnjfrrqwrdiiun.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNicXF5bHJuamZycnF3cmRpaXVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5Mzg1MTEsImV4cCI6MjA5ODUxNDUxMX0.DlOsiff8VpyBNB1BrvnR8ny6b0CXwziM6ZqaHDcHz0Y";
 
 const state = {
   client: null,
@@ -26,13 +27,10 @@ const dayNames = ["週日", "週一", "週二", "週三", "週四", "週五", "�
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
-  hydrateSupabaseConfig();
+  initializeSupabase();
   setDefaultTimes();
   renderAll();
-
-  if (state.config) {
-    await connectAndLoad();
-  }
+  await connectAndLoad();
 });
 
 function bindEvents() {
@@ -43,74 +41,19 @@ function bindEvents() {
   document.getElementById("equipmentForm").addEventListener("submit", submitEquipment);
   document.getElementById("equipmentCancelBtn").addEventListener("click", cancelEquipmentEdit);
   document.getElementById("equipmentResetBtn").addEventListener("click", resetEquipmentForm);
-  document.getElementById("supabaseConfigForm").addEventListener("submit", saveSupabaseConfig);
-  document.getElementById("clearSupabaseConfigBtn").addEventListener("click", clearSupabaseConfig);
 
   document.querySelectorAll("[data-view-target]").forEach((button) => {
     button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
   });
 }
 
-function hydrateSupabaseConfig() {
-  const raw = window.localStorage.getItem(SUPABASE_CONFIG_KEY);
-  if (!raw) {
-    renderConnectionState();
-    return;
-  }
-
-  try {
-    const config = JSON.parse(raw);
-    state.config = normalizeSupabaseConfig(config);
-    document.getElementById("supabaseUrl").value = state.config.url;
-    document.getElementById("supabaseAnonKey").value = state.config.anonKey;
-    state.client = buildClient(state.config);
-  } catch (error) {
-    console.warn("Failed to restore Supabase config", error);
-    window.localStorage.removeItem(SUPABASE_CONFIG_KEY);
-    state.config = null;
-    state.client = null;
-  }
-
+function initializeSupabase() {
+  state.config = normalizeSupabaseConfig({
+    url: SUPABASE_URL,
+    anonKey: SUPABASE_ANON_KEY,
+  });
+  state.client = buildClient(state.config);
   renderConnectionState();
-}
-
-async function saveSupabaseConfig(event) {
-  event.preventDefault();
-  const message = document.getElementById("supabaseConfigMessage");
-
-  try {
-    const formData = new FormData(event.currentTarget);
-    const config = normalizeSupabaseConfig({
-      url: formData.get("supabase_url"),
-      anonKey: formData.get("supabase_anon_key"),
-    });
-
-    state.config = config;
-    state.client = buildClient(config);
-    window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(config));
-    renderConnectionState();
-    message.textContent = "設定已儲存，正在連線 Supabase。";
-    await connectAndLoad();
-    message.textContent = "Supabase 已連線。";
-  } catch (error) {
-    message.textContent = error.message;
-    renderNotice(error.message, "error");
-    renderConnectionState("disconnected");
-  }
-}
-
-function clearSupabaseConfig() {
-  state.client = null;
-  state.config = null;
-  state.equipment = [];
-  state.reservations = [];
-  state.editingEquipmentId = null;
-  window.localStorage.removeItem(SUPABASE_CONFIG_KEY);
-  document.getElementById("supabaseConfigForm").reset();
-  document.getElementById("supabaseConfigMessage").textContent = "已清除連線設定。";
-  renderNotice("請重新輸入 Supabase URL 與 anon key。", "info");
-  renderConnectionState("disconnected");
-  renderAll();
 }
 
 function normalizeSupabaseConfig(config) {
@@ -142,7 +85,7 @@ function buildClient(config) {
 
 async function connectAndLoad(forceRefresh = false) {
   if (!state.client) {
-    renderNotice("請先完成 Supabase 連線設定。", "info");
+    renderNotice("Supabase 初始化失敗，請稍後再試。", "error");
     renderConnectionState("disconnected");
     renderAll();
     return;
@@ -156,7 +99,7 @@ async function connectAndLoad(forceRefresh = false) {
   try {
     await loadAll();
     renderConnectionState("connected");
-    renderNotice("已連線到 Supabase，畫面資料來自雲端。", "success");
+    renderNotice("已連線到 Supabase，所有資料都直接來自雲端。", "success");
   } catch (error) {
     console.error(error);
     renderConnectionState("disconnected");
@@ -743,7 +686,7 @@ async function cancelReservation(reservation) {
 
 function assertClientReady() {
   if (!state.client) {
-    throw new Error("請先完成 Supabase 連線設定。");
+    throw new Error("Supabase 尚未完成初始化。");
   }
 }
 
