@@ -1,6 +1,8 @@
 const SUPABASE_URL = "https://sbqqylrnjfrrqwrdiiun.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNicXF5bHJuamZycnF3cmRpaXVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5Mzg1MTEsImV4cCI6MjA5ODUxNDUxMX0.DlOsiff8VpyBNB1BrvnR8ny6b0CXwziM6ZqaHDcHz0Y";
 
+const AUTO_REFRESH_MS = 60000;
+
 const state = {
   client: null,
   config: null,
@@ -11,6 +13,8 @@ const state = {
   activeView: "reservation",
   editingEquipmentId: null,
   editingRequesterId: null,
+  equipmentFormDirty: false,
+  requesterFormDirty: false,
   requesterSuggestions: {
     requester_name: [],
     requester_email: [],
@@ -23,16 +27,14 @@ const state = {
   },
 };
 
-const AUTO_REFRESH_MS = 60000;
-
 const statusText = {
   available: "可預約",
   reserved: "已預約",
   maintenance: "維修中",
   offline: "停用",
   cancelled: "已取消",
-  checked_in: "使用中",
-  checked_out: "已結束",
+  checked_in: "已啟用",
+  checked_out: "已結案",
 };
 
 statusText.validation = "驗證中";
@@ -64,13 +66,20 @@ function bindEvents() {
   document.getElementById("openBulletinWindowBtn").addEventListener("click", openBulletinWindow);
   document.getElementById("bulletinScrollInterval").addEventListener("change", updateBulletinScrollSettings);
   document.getElementById("bulletinScrollDuration").addEventListener("change", updateBulletinScrollSettings);
+
   document.getElementById("reservationForm").addEventListener("submit", submitReservation);
+  document.querySelector("#reservationForm select[name='equipment_id']").addEventListener("change", syncReservationEquipmentState);
+
   document.getElementById("equipmentForm").addEventListener("submit", submitEquipment);
-  document.getElementById("requesterForm").addEventListener("submit", submitRequester);
+  document.getElementById("equipmentForm").addEventListener("input", markEquipmentFormDirty);
   document.getElementById("equipmentCancelBtn").addEventListener("click", cancelEquipmentEdit);
   document.getElementById("equipmentResetBtn").addEventListener("click", resetEquipmentForm);
+
+  document.getElementById("requesterForm").addEventListener("submit", submitRequester);
+  document.getElementById("requesterForm").addEventListener("input", markRequesterFormDirty);
   document.getElementById("requesterCancelBtn").addEventListener("click", cancelRequesterEdit);
   document.getElementById("requesterResetBtn").addEventListener("click", resetRequesterForm);
+
   document.querySelector("#reservationForm input[name='requester_name']").addEventListener("input", handleRequesterLookup);
   document.querySelector("#reservationForm input[name='requester_name']").addEventListener("change", syncRequesterFields);
   document.querySelector("#reservationForm input[name='requester_email']").addEventListener("input", handleRequesterLookup);
@@ -92,8 +101,6 @@ function hydrateViewFromLocation() {
 function initializeBulletinControls() {
   const intervalInput = document.getElementById("bulletinScrollInterval");
   const durationInput = document.getElementById("bulletinScrollDuration");
-  if (!intervalInput || !durationInput) return;
-
   intervalInput.value = String(state.bulletinScroll.intervalSeconds);
   durationInput.value = String(state.bulletinScroll.durationSeconds);
 }
@@ -110,20 +117,18 @@ function initializeSupabase() {
 function normalizeSupabaseConfig(config) {
   const url = String(config?.url || "").trim().replace(/\/+$/, "");
   const anonKey = String(config?.anonKey || "").trim();
-
   if (!url.startsWith("https://")) {
     throw new Error("Supabase URL 必須是 https:// 開頭。");
   }
   if (!anonKey) {
-    throw new Error("請輸入 Supabase anon key。");
+    throw new Error("請提供 Supabase anon key。");
   }
-
   return { url, anonKey };
 }
 
 function buildClient(config) {
   if (!window.supabase?.createClient) {
-    throw new Error("Supabase SDK 載入失敗，請稍後重整頁面。");
+    throw new Error("Supabase SDK 尚未載入。");
   }
 
   return window.supabase.createClient(config.url, config.anonKey, {
@@ -136,21 +141,21 @@ function buildClient(config) {
 
 async function connectAndLoad(forceRefresh = false) {
   if (!state.client) {
-    renderNotice("Supabase 初始化失敗，請稍後再試。", "error");
     renderConnectionState("disconnected");
+    renderNotice("Supabase 尚未初始化。", "error");
     renderAll();
     return;
   }
 
   renderConnectionState("connecting");
   if (forceRefresh) {
-    renderNotice("正在重新同步雲端資料...", "info");
+    renderNotice("正在重新讀取雲端資料...", "info");
   }
 
   try {
     await loadAll();
     renderConnectionState("connected");
-    renderNotice("已連線到 Supabase，所有資料都直接來自雲端。", "success");
+    renderNotice("已連線 Supabase，資料同步完成。", "success");
   } catch (error) {
     console.error(error);
     renderConnectionState("disconnected");
@@ -186,12 +191,12 @@ async function loadRequesterDirectory() {
 async function loadEquipment() {
   const { data, error } = await state.client
     .from("equipment")
-    .select("id, name, category, location, status, capacity, is_active")
+    .select("id, name, category, location, status, capacity, is_active, requires_test_condition")
     .order("is_active", { ascending: false })
     .order("category", { ascending: true })
     .order("name", { ascending: true });
 
-  assertNoError(error, "設備資料讀取失敗");
+  assertNoError(error, "讀取設備資料失敗");
   state.equipment = data || [];
 }
 
@@ -208,6 +213,7 @@ async function loadReservations() {
       department,
       project_name,
       purpose,
+      test_condition,
       start_time,
       end_time,
       status,
@@ -223,7 +229,7 @@ async function loadReservations() {
     .gt("end_time", fromIso)
     .order("start_time", { ascending: true });
 
-  assertNoError(error, "預約資料讀取失敗");
+  assertNoError(error, "讀取預約資料失敗");
 
   const equipmentById = new Map(state.equipment.map((item) => [Number(item.id), item]));
   state.reservations = (data || []).map((item) => {
@@ -251,67 +257,35 @@ function renderAll() {
   syncRequesterForm();
 }
 
+function markEquipmentFormDirty() {
+  state.equipmentFormDirty = true;
+}
+
+function markRequesterFormDirty() {
+  state.requesterFormDirty = true;
+}
+
 function renderRequesterOptions() {
   const nameList = document.getElementById("requesterNameOptions");
   const emailList = document.getElementById("requesterEmailOptions");
-  if (!nameList || !emailList) return;
-
   nameList.innerHTML = state.requesters
     .filter((item) => item.is_active)
     .map((item) => `<option value="${escapeHtml(item.name)}"></option>`)
     .join("");
-
   emailList.innerHTML = state.requesters
     .filter((item) => item.is_active)
     .map((item) => `<option value="${escapeHtml(item.email)}"></option>`)
     .join("");
 }
 
-function renderRequesterSummary() {
-  const root = document.getElementById("requesterSummary");
-  if (!root) return;
-
-  if (!state.requesters.length) {
-    root.innerHTML = '<article class="empty-card">尚未建立使用者名單，可從右側表單直接新增。</article>';
-    return;
-  }
-
-  root.innerHTML = state.requesters.map((item) => `
-    <article class="equipment-card requester-card">
-      <div>
-        <h3>${escapeHtml(item.name)}</h3>
-        <div class="equipment-state">
-          ${item.is_active ? "" : '<span class="badge inactive">停用</span>'}
-        </div>
-        <div class="equipment-card-meta">
-          <span>Email：${escapeHtml(item.email)}</span>
-          <span>部門：${escapeHtml(item.department || "PQE")}</span>
-        </div>
-      </div>
-      <div class="equipment-card-actions">
-        <button type="button" class="secondary requester-edit-btn" data-edit-requester="${item.id}">編輯</button>
-        <button type="button" class="danger-link requester-delete-btn" data-delete-requester="${item.id}">刪除</button>
-      </div>
-    </article>
-  `).join("");
-
-  root.querySelectorAll("[data-edit-requester]").forEach((button) => {
-    button.addEventListener("click", () => startEditRequester(Number(button.dataset.editRequester)));
-  });
-  root.querySelectorAll("[data-delete-requester]").forEach((button) => {
-    button.addEventListener("click", () => deleteRequester(Number(button.dataset.deleteRequester)));
-  });
-}
-
 function renderConnectionState(forcedState = null) {
   const badge = document.getElementById("connectionBadge");
   const mode = forcedState || (state.client ? "connected" : "disconnected");
-
   badge.className = `status-pill ${mode}`;
   if (mode === "connecting") {
     badge.textContent = "連線中";
   } else if (mode === "connected") {
-    badge.textContent = "雲端已連線";
+    badge.textContent = "已連線";
   } else {
     badge.textContent = "未連線";
   }
@@ -345,8 +319,6 @@ function renderViewState() {
 
 function renderDashboardMetrics() {
   const root = document.getElementById("dashboardMetrics");
-  if (!root) return;
-
   const activeReservations = state.reservations.filter((item) => item.status !== "cancelled");
   const available = state.equipment.filter((item) => item.status === "available" && item.is_active).length;
   const validation = state.equipment.filter((item) => item.status === "validation" && item.is_active).length;
@@ -360,10 +332,10 @@ function renderDashboardMetrics() {
 
   const metrics = [
     { label: "設備總數", value: state.equipment.length, hint: `可預約 ${available} 台` },
-    { label: "本週預約", value: activeReservations.length, hint: `${reservedHours.toFixed(1)} 小時已排程` },
-    { label: "驗證中", value: validation, hint: "暫不開放預約" },
-    { label: "維修中", value: maintenance, hint: "工程或校正中" },
-    { label: "停用 / 未啟用", value: offline, hint: "目前不納入排程" },
+    { label: "本週預約", value: activeReservations.length, hint: `${reservedHours.toFixed(1)} 小時` },
+    { label: "驗證中", value: validation, hint: "狀態追蹤" },
+    { label: "維修中", value: maintenance, hint: "維護排程" },
+    { label: "停用 / 離線", value: offline, hint: "不可預約" },
   ];
 
   root.innerHTML = metrics.map((item) => `
@@ -377,6 +349,7 @@ function renderDashboardMetrics() {
 
 function renderEquipmentOptions() {
   const select = document.querySelector("#reservationForm select[name='equipment_id']");
+  const previousValue = select.value;
   select.innerHTML = "";
 
   state.equipment
@@ -394,6 +367,12 @@ function renderEquipmentOptions() {
     option.textContent = "目前沒有可預約設備";
     select.appendChild(option);
   }
+
+  if (previousValue && Array.from(select.options).some((option) => option.value === previousValue)) {
+    select.value = previousValue;
+  }
+
+  syncReservationEquipmentState();
 }
 
 function renderEquipmentSummary() {
@@ -401,7 +380,7 @@ function renderEquipmentSummary() {
   root.innerHTML = "";
 
   if (!state.equipment.length) {
-    root.innerHTML = '<article class="empty-card">尚未有設備資料，可直接從右側表單新增。</article>';
+    root.innerHTML = '<article class="empty-card">目前尚無設備資料。</article>';
     return;
   }
 
@@ -413,12 +392,13 @@ function renderEquipmentSummary() {
         <h3>${escapeHtml(item.name)}</h3>
         <div class="equipment-state">
           <span class="badge ${escapeHtml(item.status)}">${escapeHtml(statusText[item.status] || item.status)}</span>
-          ${item.is_active ? "" : '<span class="badge inactive">未啟用</span>'}
+          ${item.is_active ? "" : '<span class="badge inactive">停用</span>'}
         </div>
         <div class="equipment-card-meta">
           <span>類別：${escapeHtml(item.category)}</span>
-          <span>位置：${escapeHtml(item.location || "未設定")}</span>
-          <span>容量：${escapeHtml(item.capacity)} 台</span>
+          <span>位置：${escapeHtml(item.location || "-")}</span>
+          <span>可重疊預約量：${escapeHtml(item.capacity)}</span>
+          <span>測試條件：${item.requires_test_condition ? "必填" : "非必填"}</span>
         </div>
       </div>
       <div class="equipment-card-actions">
@@ -433,6 +413,7 @@ function renderEquipmentSummary() {
 
 function startEditEquipment(equipmentId) {
   state.editingEquipmentId = Number(equipmentId);
+  state.equipmentFormDirty = false;
   syncEquipmentForm();
   setActiveView("equipment");
 }
@@ -444,7 +425,9 @@ function syncEquipmentForm() {
   const cancelButton = document.getElementById("equipmentCancelBtn");
   const resetButton = document.getElementById("equipmentResetBtn");
   const message = document.getElementById("equipmentMessage");
-  const equipment = state.equipment.find((item) => item.id === state.editingEquipmentId);
+  const equipment = state.equipment.find((item) => Number(item.id) === state.editingEquipmentId);
+
+  if (state.equipmentFormDirty) return;
 
   if (!equipment) {
     title.textContent = "新增/編輯設備資訊";
@@ -456,40 +439,40 @@ function syncEquipmentForm() {
     form.elements.category.value = "";
     form.elements.location.value = "";
     form.elements.capacity.value = "1";
+    form.elements.requires_test_condition.value = "0";
     form.elements.status.value = "available";
     form.elements.is_active.value = "1";
     if (!message.dataset.preserve) {
       message.textContent = "";
     }
+    state.equipmentFormDirty = false;
     return;
   }
 
   title.textContent = `編輯設備資訊：${equipment.name}`;
   submitButton.textContent = "儲存變更";
   cancelButton.hidden = false;
-  resetButton.textContent = "回復內容";
+  resetButton.textContent = "回復原值";
   form.elements.equipment_id.value = String(equipment.id);
   form.elements.name.value = equipment.name;
   form.elements.category.value = equipment.category;
   form.elements.location.value = equipment.location || "";
   form.elements.capacity.value = String(equipment.capacity || 1);
+  form.elements.requires_test_condition.value = equipment.requires_test_condition ? "1" : "0";
   form.elements.status.value = equipment.status;
   form.elements.is_active.value = equipment.is_active ? "1" : "0";
   message.textContent = "";
+  state.equipmentFormDirty = false;
 }
 
 function resetEquipmentForm() {
-  if (state.editingEquipmentId) {
-    syncEquipmentForm();
-    return;
-  }
-  state.editingEquipmentId = null;
-  document.getElementById("equipmentMessage").dataset.preserve = "";
+  state.equipmentFormDirty = false;
   syncEquipmentForm();
 }
 
 function cancelEquipmentEdit() {
   state.editingEquipmentId = null;
+  state.equipmentFormDirty = false;
   const message = document.getElementById("equipmentMessage");
   message.dataset.preserve = "";
   message.textContent = "已取消編輯。";
@@ -513,9 +496,7 @@ function renderBulletinBoard() {
     variant: "bulletin",
   });
   const stamp = document.getElementById("bulletinTimestamp");
-  if (stamp) {
-    stamp.textContent = `更新時間 ${new Date().toLocaleString("zh-TW")}`;
-  }
+  stamp.textContent = `更新時間 ${new Date().toLocaleString("zh-TW")}`;
   scheduleBulletinAutoScroll();
 }
 
@@ -540,7 +521,7 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
   }
 
   if (!state.equipment.length) {
-    chart.innerHTML = '<div class="gantt-placeholder">尚未有設備資料，請先新增設備。</div>';
+    chart.innerHTML = '<div class="gantt-placeholder">目前尚無設備資料。</div>';
     return;
   }
 
@@ -574,7 +555,7 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
       bar.title = `${reservation.equipment_name} / ${reservation.project_name} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
       bar.innerHTML = `
         <strong>${escapeHtml(reservation.requester_name)}</strong>
-        <span>${escapeHtml(reservation.project_name || "未填專案名稱")}</span>
+        <span>${escapeHtml(reservation.project_name || "未填專案")}</span>
         <em>${formatTime(reservation.start_time)}-${formatTime(reservation.end_time)}</em>
       `;
       lane.appendChild(bar);
@@ -654,11 +635,11 @@ async function submitReservation(event) {
   const endIso = localInputToIso(payload.end_time);
 
   if (!equipmentId) {
-    message.textContent = "請先建立可預約設備。";
+    message.textContent = "請選擇設備。";
     return;
   }
   if (!payload.project_name?.trim()) {
-    message.textContent = "請輸入專案名稱。";
+    message.textContent = "請填寫專案名稱。";
     return;
   }
   if (new Date(endIso) <= new Date(startIso)) {
@@ -669,7 +650,10 @@ async function submitReservation(event) {
   try {
     const equipment = state.equipment.find((item) => Number(item.id) === equipmentId);
     if (!equipment || !equipment.is_active || equipment.status !== "available") {
-      throw new Error("所選設備目前不可預約。");
+      throw new Error("目前設備狀態不可預約。");
+    }
+    if (equipment.requires_test_condition && !String(payload.test_condition || "").trim()) {
+      throw new Error("此設備預約時必須填寫測試條件。");
     }
 
     const { data: conflicts, error: conflictError } = await state.client
@@ -678,12 +662,11 @@ async function submitReservation(event) {
       .eq("equipment_id", equipmentId)
       .neq("status", "cancelled")
       .lt("start_time", endIso)
-      .gt("end_time", startIso)
-      .limit(1);
+      .gt("end_time", startIso);
 
-    assertNoError(conflictError, "預約衝突檢查失敗");
-    if (conflicts?.length) {
-      throw new Error(`此時段與既有預約衝突：#${conflicts[0].id} ${conflicts[0].requester_name}`);
+    assertNoError(conflictError, "讀取預約衝突失敗");
+    if ((conflicts?.length || 0) >= Number(equipment.capacity || 1)) {
+      throw new Error(`此設備於該時段的可重疊預約量已滿（上限 ${equipment.capacity || 1}）。`);
     }
 
     const reservationRow = {
@@ -693,6 +676,7 @@ async function submitReservation(event) {
       department: payload.department.trim(),
       project_name: payload.project_name.trim(),
       purpose: payload.purpose.trim(),
+      test_condition: String(payload.test_condition || "").trim(),
       start_time: startIso,
       end_time: endIso,
       status: "reserved",
@@ -706,7 +690,7 @@ async function submitReservation(event) {
       .select()
       .single();
 
-    assertNoError(insertError, "預約建立失敗");
+    assertNoError(insertError, "建立預約失敗");
 
     const { error: historyError } = await state.client
       .from("reservation_history")
@@ -717,9 +701,9 @@ async function submitReservation(event) {
         changed_by_name: payload.requester_name.trim(),
       });
 
-    assertNoError(historyError, "預約歷程寫入失敗");
+    assertNoError(historyError, "寫入預約歷程失敗");
 
-    message.textContent = "預約已建立。";
+    message.textContent = "預約已送出。";
     form.reset();
     setDefaultTimes();
     await loadReservations();
@@ -743,20 +727,21 @@ async function submitEquipment(event) {
     category: String(payload.category || "").trim(),
     location: String(payload.location || "").trim(),
     capacity: Number(payload.capacity || 1),
+    requires_test_condition: String(payload.requires_test_condition || "0") === "1",
     status: String(payload.status || "available"),
     is_active: String(payload.is_active || "1") === "1",
   };
 
   if (!row.name) {
-    message.textContent = "設備名稱不可空白。";
+    message.textContent = "請填寫設備名稱。";
     return;
   }
   if (!row.category) {
-    message.textContent = "設備類別不可空白。";
+    message.textContent = "請填寫設備類別。";
     return;
   }
   if (row.capacity < 1) {
-    message.textContent = "容量至少要為 1。";
+    message.textContent = "可重疊預約量至少需為 1。";
     return;
   }
 
@@ -766,7 +751,7 @@ async function submitEquipment(event) {
         .from("equipment")
         .update(row)
         .eq("id", equipmentId);
-      assertNoError(error, "設備更新失敗");
+      assertNoError(error, "更新設備失敗");
       message.textContent = "設備資料已更新。";
       state.editingEquipmentId = equipmentId;
     } else {
@@ -775,11 +760,12 @@ async function submitEquipment(event) {
         .insert(row)
         .select()
         .single();
-      assertNoError(error, "設備建立失敗");
+      assertNoError(error, "新增設備失敗");
       message.textContent = "設備已新增。";
       state.editingEquipmentId = Number(data.id);
     }
 
+    state.equipmentFormDirty = false;
     message.dataset.preserve = "true";
     await loadEquipment();
     renderAll();
@@ -805,11 +791,11 @@ async function submitRequester(event) {
   };
 
   if (!row.name) {
-    message.textContent = "姓名不可空白。";
+    message.textContent = "請填寫使用者名稱。";
     return;
   }
   if (!row.email) {
-    message.textContent = "Email 不可空白。";
+    message.textContent = "請填寫 Email。";
     return;
   }
 
@@ -819,7 +805,7 @@ async function submitRequester(event) {
         .from("requester_directory")
         .update(row)
         .eq("id", requesterId);
-      assertNoError(error, "使用者更新失敗");
+      assertNoError(error, "更新使用者失敗");
       message.textContent = "使用者資料已更新。";
       state.editingRequesterId = requesterId;
     } else {
@@ -831,10 +817,12 @@ async function submitRequester(event) {
           sort_order: nextSort,
         });
 
-      assertNoError(error, "使用者建立失敗");
+      assertNoError(error, "新增使用者失敗");
       message.textContent = "使用者已新增。";
+      state.editingRequesterId = null;
     }
 
+    state.requesterFormDirty = false;
     message.dataset.preserve = "true";
     form.reset();
     form.elements.department.value = "PQE";
@@ -847,8 +835,43 @@ async function submitRequester(event) {
   }
 }
 
+function renderRequesterSummary() {
+  const root = document.getElementById("requesterSummary");
+  if (!state.requesters.length) {
+    root.innerHTML = '<article class="empty-card">目前尚無使用者資料。</article>';
+    return;
+  }
+
+  root.innerHTML = state.requesters.map((item) => `
+    <article class="equipment-card requester-card">
+      <div>
+        <h3>${escapeHtml(item.name)}</h3>
+        <div class="equipment-state">
+          ${item.is_active ? "" : '<span class="badge inactive">停用</span>'}
+        </div>
+        <div class="equipment-card-meta">
+          <span>Email：${escapeHtml(item.email)}</span>
+          <span>部門：${escapeHtml(item.department || "PQE")}</span>
+        </div>
+      </div>
+      <div class="equipment-card-actions">
+        <button type="button" class="secondary requester-edit-btn" data-edit-requester="${item.id}">編輯</button>
+        <button type="button" class="danger-link requester-delete-btn" data-delete-requester="${item.id}">刪除</button>
+      </div>
+    </article>
+  `).join("");
+
+  root.querySelectorAll("[data-edit-requester]").forEach((button) => {
+    button.addEventListener("click", () => startEditRequester(Number(button.dataset.editRequester)));
+  });
+  root.querySelectorAll("[data-delete-requester]").forEach((button) => {
+    button.addEventListener("click", () => deleteRequester(Number(button.dataset.deleteRequester)));
+  });
+}
+
 function startEditRequester(requesterId) {
   state.editingRequesterId = Number(requesterId);
+  state.requesterFormDirty = false;
   syncRequesterForm();
   setActiveView("requester");
 }
@@ -861,6 +884,8 @@ function syncRequesterForm() {
   const resetButton = document.getElementById("requesterResetBtn");
   const message = document.getElementById("requesterMessage");
   const requester = state.requesters.find((item) => Number(item.id) === state.editingRequesterId);
+
+  if (state.requesterFormDirty) return;
 
   if (!requester) {
     title.textContent = "新增/編輯使用者";
@@ -875,33 +900,31 @@ function syncRequesterForm() {
     if (!message.dataset.preserve) {
       message.textContent = "";
     }
+    state.requesterFormDirty = false;
     return;
   }
 
   title.textContent = `編輯使用者：${requester.name}`;
   submitButton.textContent = "儲存變更";
   cancelButton.hidden = false;
-  resetButton.textContent = "回復內容";
+  resetButton.textContent = "回復原值";
   form.elements.requester_id.value = String(requester.id);
   form.elements.name.value = requester.name;
   form.elements.email.value = requester.email;
   form.elements.department.value = requester.department || "PQE";
   form.elements.is_active.value = requester.is_active ? "1" : "0";
   message.textContent = "";
+  state.requesterFormDirty = false;
 }
 
 function resetRequesterForm() {
-  if (state.editingRequesterId) {
-    syncRequesterForm();
-    return;
-  }
-  state.editingRequesterId = null;
-  document.getElementById("requesterMessage").dataset.preserve = "";
+  state.requesterFormDirty = false;
   syncRequesterForm();
 }
 
 function cancelRequesterEdit() {
   state.editingRequesterId = null;
+  state.requesterFormDirty = false;
   const message = document.getElementById("requesterMessage");
   message.dataset.preserve = "";
   message.textContent = "已取消編輯。";
@@ -914,7 +937,7 @@ async function deleteRequester(requesterId) {
   const requester = state.requesters.find((item) => Number(item.id) === Number(requesterId));
   if (!requester) return;
 
-  const confirmed = window.confirm(`確定要刪除使用者「${requester.name}」嗎？`);
+  const confirmed = window.confirm(`確定要停用使用者 ${requester.name} 嗎？`);
   if (!confirmed) return;
 
   try {
@@ -923,10 +946,11 @@ async function deleteRequester(requesterId) {
       .update({ is_active: false })
       .eq("id", requesterId);
 
-    assertNoError(error, "使用者刪除失敗");
+    assertNoError(error, "停用使用者失敗");
 
     if (state.editingRequesterId === Number(requesterId)) {
       state.editingRequesterId = null;
+      state.requesterFormDirty = false;
     }
 
     document.getElementById("requesterMessage").textContent = "使用者已刪除。";
@@ -943,13 +967,14 @@ function equipmentMatchesPayload(equipment, payload) {
     && String(equipment.location || "") === String(payload.location || "")
     && Number(equipment.capacity) === Number(payload.capacity)
     && String(equipment.status) === String(payload.status)
-    && Boolean(equipment.is_active) === Boolean(payload.is_active);
+    && Boolean(equipment.is_active) === Boolean(payload.is_active)
+    && Boolean(equipment.requires_test_condition) === Boolean(payload.requires_test_condition);
 }
 
 async function cancelReservation(reservation) {
   assertClientReady();
 
-  const reason = window.prompt("請輸入取消原因", "時程變更");
+  const reason = window.prompt("請輸入取消原因", "行程異動");
   if (!reason) return;
 
   try {
@@ -958,7 +983,7 @@ async function cancelReservation(reservation) {
       .select("*")
       .eq("id", reservation.id)
       .single();
-    assertNoError(loadError, "預約資料讀取失敗");
+    assertNoError(loadError, "讀取預約失敗");
 
     const { data: updated, error: updateError } = await state.client
       .from("reservations")
@@ -977,7 +1002,7 @@ async function cancelReservation(reservation) {
         new_value: updated,
         changed_by_name: reservation.requester_name,
       });
-    assertNoError(historyError, "預約歷程寫入失敗");
+    assertNoError(historyError, "寫入預約歷程失敗");
 
     await loadReservations();
     renderAll();
@@ -988,7 +1013,7 @@ async function cancelReservation(reservation) {
 
 function assertClientReady() {
   if (!state.client) {
-    throw new Error("Supabase 尚未完成初始化。");
+    throw new Error("Supabase 尚未連線。");
   }
 }
 
@@ -1009,8 +1034,6 @@ function moveWeek(days) {
 function updateBulletinScrollSettings() {
   const intervalInput = document.getElementById("bulletinScrollInterval");
   const durationInput = document.getElementById("bulletinScrollDuration");
-  if (!intervalInput || !durationInput) return;
-
   state.bulletinScroll.intervalSeconds = clampNumber(intervalInput.value, 5, 300, 30);
   state.bulletinScroll.durationSeconds = clampNumber(durationInput.value, 1, 30, 6);
   intervalInput.value = String(state.bulletinScroll.intervalSeconds);
@@ -1094,6 +1117,27 @@ function setDefaultTimes() {
   form.elements.department.value = "PQE";
   form.elements.start_time.value = toDateTimeInput(start);
   form.elements.end_time.value = toDateTimeInput(end);
+  if (form.elements.test_condition) {
+    form.elements.test_condition.value = "";
+  }
+  syncReservationEquipmentState();
+}
+
+function syncReservationEquipmentState() {
+  const form = document.getElementById("reservationForm");
+  if (!form) return;
+  const equipmentId = Number(form.elements.equipment_id.value || 0);
+  const equipment = state.equipment.find((item) => Number(item.id) === equipmentId) || null;
+  const field = document.getElementById("testConditionField");
+  const input = form.elements.test_condition;
+  if (!field || !input) return;
+
+  const requiresTestCondition = Boolean(equipment?.requires_test_condition);
+  field.hidden = !requiresTestCondition;
+  input.required = requiresTestCondition;
+  if (!requiresTestCondition) {
+    input.value = "";
+  }
 }
 
 function handleRequesterLookup(event) {
@@ -1206,53 +1250,53 @@ function syncRequesterFields(event) {
 }
 
 function startOfWeek(date) {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  value.setDate(value.getDate() - value.getDay());
-  return value;
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
 }
 
 function addDays(date, days) {
-  const value = new Date(date);
-  value.setDate(value.getDate() + days);
-  return value;
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
 }
 
 function addHours(date, hours) {
-  const value = new Date(date);
-  value.setHours(value.getHours() + hours);
-  return value;
+  const d = new Date(date);
+  d.setHours(d.getHours() + hours);
+  return d;
+}
+
+function formatDate(date) {
+  const d = new Date(date);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function formatTime(value) {
+  const d = new Date(value);
+  return d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function formatDateTime(value) {
+  const d = new Date(value);
+  const day = d.toLocaleDateString("zh-TW", { month: "2-digit", day: "2-digit" });
+  const time = d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${day} ${time}`;
 }
 
 function toDateTimeInput(date) {
-  const pad = (number) => String(number).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const d = new Date(date);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function localInputToIso(value) {
   return new Date(value).toISOString();
 }
 
-function dateToIso(value) {
-  return new Date(value).toISOString();
-}
-
-function formatDate(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  return `${date.getMonth() + 1}/${date.getDate()}`;
-}
-
-function formatTime(value) {
-  return new Date(value).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatDateTime(value) {
-  return new Date(value).toLocaleString("zh-TW", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function dateToIso(date) {
+  return new Date(date).toISOString();
 }
 
 function escapeHtml(value) {
@@ -1261,5 +1305,5 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replaceAll("'", "&#39;");
 }

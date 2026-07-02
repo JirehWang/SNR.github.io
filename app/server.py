@@ -76,28 +76,34 @@ class App:
                 """
             )
             self.ensure_column(conn, "reservations", "project_name", "TEXT NOT NULL DEFAULT ''")
+            self.ensure_column(conn, "equipment", "requires_test_condition", "INTEGER NOT NULL DEFAULT 0")
+            self.ensure_column(conn, "reservations", "test_condition", "TEXT NOT NULL DEFAULT ''")
 
             count = conn.execute("SELECT COUNT(*) AS count FROM equipment").fetchone()["count"]
             if count == 0:
                 conn.executemany(
                     """
-                    INSERT INTO equipment (name, category, location, status, capacity)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO equipment (
+                        name,
+                        category,
+                        location,
+                        status,
+                        capacity,
+                        requires_test_condition
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     [
-                        ("環境箱 A", "環境箱", "可靠度實驗室 1F", "available", 1),
-                        ("ESD 測試機", "ESD", "可靠度實驗室 1F", "available", 1),
-                        ("Drop Tester", "DROP", "可靠度實驗室 2F", "available", 1),
-                        ("Vibration Table", "VIBRATION", "可靠度實驗室 2F", "maintenance", 1),
+                        ("Temp Chamber A", "TEMP", "Reliability Lab 1F", "available", 1, 0),
+                        ("ESD Tester", "ESD", "Reliability Lab 1F", "available", 1, 0),
+                        ("Drop Tester", "DROP", "Reliability Lab 2F", "available", 1, 0),
+                        ("Vibration Table", "VIBRATION", "Reliability Lab 2F", "maintenance", 1, 0),
                     ],
                 )
 
     @staticmethod
     def ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str):
-        columns = {
-            row["name"]
-            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        }
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
         if column_name not in columns:
             conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
@@ -137,6 +143,14 @@ def normalize_status(value: str):
     if status not in allowed_statuses:
         raise ApiError(400, "status must be available, validation, maintenance, or offline")
     return status
+
+
+def normalize_bool_flag(value: Any, default: int = 0):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return 1 if value else 0
+    return 1 if int(value) else 0
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -209,7 +223,7 @@ class Handler(SimpleHTTPRequestHandler):
         with self.app.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, name, category, location, status, capacity, is_active
+                SELECT id, name, category, location, status, capacity, is_active, requires_test_condition
                 FROM equipment
                 ORDER BY is_active DESC, category, name
                 """
@@ -222,16 +236,28 @@ class Handler(SimpleHTTPRequestHandler):
         missing = [field for field in required if not str(data.get(field, "")).strip()]
         if missing:
             raise ApiError(400, f"Missing required fields: {', '.join(missing)}")
+
         capacity = int(data.get("capacity") or 1)
         if capacity < 1:
             raise ApiError(400, "capacity must be at least 1")
+
         status = normalize_status(data.get("status", "available"))
-        is_active = 1 if int(data.get("is_active", 1)) else 0
+        is_active = normalize_bool_flag(data.get("is_active", 1), 1)
+        requires_test_condition = normalize_bool_flag(data.get("requires_test_condition", 0), 0)
+
         with self.app.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO equipment (name, category, location, status, capacity, is_active)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO equipment (
+                    name,
+                    category,
+                    location,
+                    status,
+                    capacity,
+                    is_active,
+                    requires_test_condition
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data["name"].strip(),
@@ -240,6 +266,7 @@ class Handler(SimpleHTTPRequestHandler):
                     status,
                     capacity,
                     is_active,
+                    requires_test_condition,
                 ),
             )
             row = conn.execute("SELECT * FROM equipment WHERE id = ?", (cursor.lastrowid,)).fetchone()
@@ -251,29 +278,37 @@ class Handler(SimpleHTTPRequestHandler):
             current = conn.execute("SELECT * FROM equipment WHERE id = ?", (equipment_id,)).fetchone()
             if current is None:
                 raise ApiError(404, "Equipment not found")
+
             name = str(data.get("name", current["name"])).strip()
             category = str(data.get("category", current["category"])).strip()
             location = str(data.get("location", current["location"])).strip()
             status = normalize_status(data.get("status", current["status"]))
             capacity = int(data.get("capacity", current["capacity"]) or 1)
-            is_active = 1 if int(data.get("is_active", current["is_active"])) else 0
+            is_active = normalize_bool_flag(data.get("is_active", current["is_active"]), int(current["is_active"]))
+            requires_test_condition = normalize_bool_flag(
+                data.get("requires_test_condition", current["requires_test_condition"]),
+                int(current["requires_test_condition"]),
+            )
+
             if not name:
                 raise ApiError(400, "name is required")
             if not category:
                 raise ApiError(400, "category is required")
             if capacity < 1:
                 raise ApiError(400, "capacity must be at least 1")
+
             conn.execute(
                 """
                 UPDATE equipment
-                SET name = ?, category = ?, location = ?, status = ?, capacity = ?, is_active = ?
+                SET name = ?, category = ?, location = ?, status = ?, capacity = ?, is_active = ?,
+                    requires_test_condition = ?
                 WHERE id = ?
                 """,
-                (name, category, location, status, capacity, is_active, equipment_id),
+                (name, category, location, status, capacity, is_active, requires_test_condition, equipment_id),
             )
             row = conn.execute(
                 """
-                SELECT id, name, category, location, status, capacity, is_active
+                SELECT id, name, category, location, status, capacity, is_active, requires_test_condition
                 FROM equipment
                 WHERE id = ?
                 """,
@@ -293,6 +328,7 @@ class Handler(SimpleHTTPRequestHandler):
         if query.get("equipment_id"):
             where.append("equipment_id = ?")
             params.append(int(query["equipment_id"][0]))
+
         with self.app.connect() as conn:
             rows = conn.execute(
                 f"""
@@ -330,23 +366,42 @@ class Handler(SimpleHTTPRequestHandler):
 
         with self.app.connect() as conn:
             equipment = conn.execute(
-                "SELECT * FROM equipment WHERE id = ? AND is_active = 1", (equipment_id,)
+                "SELECT * FROM equipment WHERE id = ? AND is_active = 1",
+                (equipment_id,),
             ).fetchone()
             if equipment is None:
                 raise ApiError(404, "Equipment not found")
             if equipment["status"] != "available":
                 raise ApiError(409, "Equipment is not available for booking")
-            conflict = find_conflict(conn, equipment_id, data["start_time"], data["end_time"])
-            if conflict:
-                raise ApiError(409, f"Reservation conflicts with #{conflict['id']} ({conflict['requester_name']})")
+
+            test_condition = str(data.get("test_condition", "")).strip()
+            if int(equipment["requires_test_condition"]) and not test_condition:
+                raise ApiError(400, "test_condition is required for this equipment")
+
+            overlap_count = count_overlapping_reservations(conn, equipment_id, data["start_time"], data["end_time"])
+            if overlap_count >= int(equipment["capacity"]):
+                raise ApiError(
+                    409,
+                    f"Reservation limit reached for this equipment ({equipment['capacity']})",
+                )
 
             cursor = conn.execute(
                 """
                 INSERT INTO reservations (
-                    equipment_id, requester_name, requester_email, department, project_name, purpose,
-                    start_time, end_time, status, approval_status, notes
+                    equipment_id,
+                    requester_name,
+                    requester_email,
+                    department,
+                    project_name,
+                    purpose,
+                    start_time,
+                    end_time,
+                    status,
+                    approval_status,
+                    notes,
+                    test_condition
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reserved', 'not_required', ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reserved', 'not_required', ?, ?)
                 """,
                 (
                     equipment_id,
@@ -358,6 +413,7 @@ class Handler(SimpleHTTPRequestHandler):
                     data["start_time"],
                     data["end_time"],
                     str(data.get("notes", "")).strip(),
+                    test_condition,
                 ),
             )
             reservation_id = cursor.lastrowid
@@ -385,17 +441,34 @@ class Handler(SimpleHTTPRequestHandler):
             if parse_dt(new_end, "end_time") <= parse_dt(new_start, "start_time"):
                 raise ApiError(400, "end_time must be later than start_time")
 
+            equipment = conn.execute("SELECT * FROM equipment WHERE id = ?", (current["equipment_id"],)).fetchone()
+            if equipment is None:
+                raise ApiError(404, "Equipment not found")
+
+            new_test_condition = str(data.get("test_condition", current["test_condition"] or "")).strip()
+            if int(equipment["requires_test_condition"]) and new_status != "cancelled" and not new_test_condition:
+                raise ApiError(400, "test_condition is required for this equipment")
+
             if new_status != "cancelled":
-                conflict = find_conflict(conn, current["equipment_id"], new_start, new_end, reservation_id)
-                if conflict:
-                    raise ApiError(409, f"Reservation conflicts with #{conflict['id']} ({conflict['requester_name']})")
+                overlap_count = count_overlapping_reservations(
+                    conn,
+                    current["equipment_id"],
+                    new_start,
+                    new_end,
+                    reservation_id,
+                )
+                if overlap_count >= int(equipment["capacity"]):
+                    raise ApiError(
+                        409,
+                        f"Reservation limit reached for this equipment ({equipment['capacity']})",
+                    )
 
             old_value = json.dumps(row_to_dict(current), ensure_ascii=False)
             conn.execute(
                 """
                 UPDATE reservations
                 SET project_name = ?, start_time = ?, end_time = ?, status = ?, notes = ?, cancel_reason = ?,
-                    updated_at = CURRENT_TIMESTAMP
+                    test_condition = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (
@@ -405,6 +478,7 @@ class Handler(SimpleHTTPRequestHandler):
                     new_status,
                     data.get("notes", current["notes"]),
                     data.get("cancel_reason", current["cancel_reason"]),
+                    new_test_condition,
                     reservation_id,
                 ),
             )
@@ -438,7 +512,7 @@ def get_reservation(conn: sqlite3.Connection, reservation_id: int):
     ).fetchone()
 
 
-def find_conflict(
+def count_overlapping_reservations(
     conn: sqlite3.Connection,
     equipment_id: int,
     start_time: str,
@@ -450,20 +524,19 @@ def find_conflict(
     if exclude_reservation_id:
         exclude = "AND id <> ?"
         params.append(exclude_reservation_id)
-    return conn.execute(
+    row = conn.execute(
         f"""
-        SELECT id, requester_name, start_time, end_time
+        SELECT COUNT(*) AS count
         FROM reservations
         WHERE equipment_id = ?
           AND status <> 'cancelled'
           AND start_time < ?
           AND end_time > ?
           {exclude}
-        ORDER BY start_time
-        LIMIT 1
         """,
         params,
     ).fetchone()
+    return int(row["count"])
 
 
 class TestServer:

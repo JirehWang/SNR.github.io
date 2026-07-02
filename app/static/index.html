@@ -141,9 +141,13 @@
                     <option value="其他">其他</option>
                   </select>
                 </label>
+                <label class="wide" id="testConditionField" hidden>
+                  測試條件
+                  <textarea name="test_condition" rows="3"></textarea>
+                </label>
                 <label class="wide">
                   備註
-                  <textarea name="notes" rows="3" placeholder="可填寫樣品資訊、測試條件或交接事項"></textarea>
+                  <textarea name="notes" rows="3"></textarea>
                 </label>
                 <div class="form-actions wide">
                   <button type="submit">送出預約</button>
@@ -191,8 +195,15 @@
                 <input name="location" placeholder="例如：1F A 區">
               </label>
               <label>
-                容量
+                可重疊預約量
                 <input name="capacity" type="number" min="1" step="1" value="1" required>
+              </label>
+              <label>
+                預約需填測試條件
+                <select name="requires_test_condition">
+                  <option value="0">否</option>
+                  <option value="1">是</option>
+                </select>
               </label>
               <label>
                 狀態
