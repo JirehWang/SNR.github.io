@@ -101,15 +101,15 @@
                 </label>
                 <label>
                   申請人
-                  <input name="requester_name" required placeholder="請輸入姓名">
+                  <input name="requester_name" list="requesterNameOptions" required placeholder="請輸入姓名或選擇建議名單" autocomplete="off">
                 </label>
                 <label>
                   Email
-                  <input name="requester_email" type="email" required placeholder="name@example.com">
+                  <input name="requester_email" list="requesterEmailOptions" type="email" required placeholder="name@example.com" autocomplete="off">
                 </label>
                 <label>
                   部門
-                  <input name="department" required value="可靠度實驗室">
+                  <input name="department" required value="PQE">
                 </label>
                 <label class="wide">
                   專案名稱
@@ -142,6 +142,8 @@
                   <span id="formMessage" role="status"></span>
                 </div>
               </form>
+              <datalist id="requesterNameOptions"></datalist>
+              <datalist id="requesterEmailOptions"></datalist>
             </section>
           </aside>
         </div>

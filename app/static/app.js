@@ -6,6 +6,7 @@ const state = {
   config: null,
   equipment: [],
   reservations: [],
+  requesters: [],
   weekStart: startOfWeek(new Date()),
   activeView: "reservation",
   editingEquipmentId: null,
@@ -41,6 +42,8 @@ function bindEvents() {
   document.getElementById("equipmentForm").addEventListener("submit", submitEquipment);
   document.getElementById("equipmentCancelBtn").addEventListener("click", cancelEquipmentEdit);
   document.getElementById("equipmentResetBtn").addEventListener("click", resetEquipmentForm);
+  document.querySelector("#reservationForm input[name='requester_name']").addEventListener("change", syncRequesterFields);
+  document.querySelector("#reservationForm input[name='requester_email']").addEventListener("change", syncRequesterFields);
 
   document.querySelectorAll("[data-view-target]").forEach((button) => {
     button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
@@ -110,8 +113,26 @@ async function connectAndLoad(forceRefresh = false) {
 }
 
 async function loadAll() {
+  await loadRequesterDirectory();
   await loadEquipment();
   await loadReservations();
+}
+
+async function loadRequesterDirectory() {
+  const { data, error } = await state.client
+    .from("requester_directory")
+    .select("id, name, email, department, sort_order, is_active")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.warn("Requester directory unavailable", error.message);
+    state.requesters = [];
+    return;
+  }
+
+  state.requesters = data || [];
 }
 
 async function loadEquipment() {
@@ -170,12 +191,27 @@ async function loadReservations() {
 function renderAll() {
   renderDashboardMetrics();
   renderEquipmentOptions();
+  renderRequesterOptions();
   renderEquipmentSummary();
   renderGantt();
   renderReservationRows();
   renderViewState();
   renderConnectionState();
   syncEquipmentForm();
+}
+
+function renderRequesterOptions() {
+  const nameList = document.getElementById("requesterNameOptions");
+  const emailList = document.getElementById("requesterEmailOptions");
+  if (!nameList || !emailList) return;
+
+  nameList.innerHTML = state.requesters
+    .map((item) => `<option value="${escapeHtml(item.name)}"></option>`)
+    .join("");
+
+  emailList.innerHTML = state.requesters
+    .map((item) => `<option value="${escapeHtml(item.email)}"></option>`)
+    .join("");
 }
 
 function renderConnectionState(forcedState = null) {
@@ -710,8 +746,54 @@ function setDefaultTimes() {
   now.setMinutes(0, 0, 0);
   const start = addHours(now, 1);
   const end = addHours(start, 2);
+  form.elements.department.value = "PQE";
   form.elements.start_time.value = toDateTimeInput(start);
   form.elements.end_time.value = toDateTimeInput(end);
+}
+
+function syncRequesterFields(event) {
+  const form = document.getElementById("reservationForm");
+  const nameInput = form.elements.requester_name;
+  const emailInput = form.elements.requester_email;
+  const departmentInput = form.elements.department;
+  const enteredName = String(nameInput.value || "").trim();
+  const enteredEmail = String(emailInput.value || "").trim().toLowerCase();
+
+  let match = null;
+  if (event?.target?.name === "requester_name") {
+    match = state.requesters.find((item) => item.name === enteredName);
+    if (match && !emailInput.value.trim()) {
+      emailInput.value = match.email;
+    }
+    if (match && !departmentInput.value.trim()) {
+      departmentInput.value = match.department || "PQE";
+    }
+    return;
+  }
+
+  if (event?.target?.name === "requester_email") {
+    match = state.requesters.find((item) => item.email.toLowerCase() === enteredEmail);
+    if (match && !nameInput.value.trim()) {
+      nameInput.value = match.name;
+    }
+    if (match && !departmentInput.value.trim()) {
+      departmentInput.value = match.department || "PQE";
+    }
+    return;
+  }
+
+  match = state.requesters.find((item) => item.name === enteredName || item.email.toLowerCase() === enteredEmail);
+  if (match) {
+    if (!nameInput.value.trim()) {
+      nameInput.value = match.name;
+    }
+    if (!emailInput.value.trim()) {
+      emailInput.value = match.email;
+    }
+    if (!departmentInput.value.trim()) {
+      departmentInput.value = match.department || "PQE";
+    }
+  }
 }
 
 function startOfWeek(date) {

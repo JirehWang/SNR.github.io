@@ -38,7 +38,16 @@ class StaticUiTestCase(unittest.TestCase):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
 
         self.assertIn('name="project_name"', html)
+        self.assertIn('list="requesterNameOptions"', html)
+        self.assertIn('list="requesterEmailOptions"', html)
+        self.assertIn('value="PQE"', html)
+        self.assertIn('id="requesterNameOptions"', html)
+        self.assertIn('id="requesterEmailOptions"', html)
         self.assertIn("project_name: payload.project_name.trim()", js)
+        self.assertIn('.from("requester_directory")', js)
+        self.assertIn("function loadRequesterDirectory()", js)
+        self.assertIn("function renderRequesterOptions()", js)
+        self.assertIn("function syncRequesterFields", js)
         self.assertNotIn('id="scheduleBoard"', html)
         self.assertNotIn("function renderWeek()", js)
 
