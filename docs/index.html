@@ -38,6 +38,7 @@
       <div class="workspace-nav" role="tablist" aria-label="功能切換">
         <button type="button" class="workspace-tab active" data-view-target="reservation" aria-selected="true">預約作業</button>
         <button type="button" class="workspace-tab" data-view-target="equipment" aria-selected="false">設備管理</button>
+        <button type="button" class="workspace-tab" data-view-target="requester" aria-selected="false">使用者管理</button>
       </div>
 
       <div class="workspace-view active" data-view="reservation">
@@ -101,11 +102,17 @@
                 </label>
                 <label>
                   申請人
-                  <input name="requester_name" list="requesterNameOptions" required placeholder="請輸入姓名或選擇建議名單" autocomplete="off">
+                  <div class="typeahead">
+                    <input name="requester_name" list="requesterNameOptions" required placeholder="請輸入姓名或選擇建議名單" autocomplete="off">
+                    <div id="requesterNameMatches" class="typeahead-menu" hidden></div>
+                  </div>
                 </label>
                 <label>
                   Email
-                  <input name="requester_email" list="requesterEmailOptions" type="email" required placeholder="name@example.com" autocomplete="off">
+                  <div class="typeahead">
+                    <input name="requester_email" list="requesterEmailOptions" type="email" required placeholder="name@example.com" autocomplete="off">
+                    <div id="requesterEmailMatches" class="typeahead-menu" hidden></div>
+                  </div>
                 </label>
                 <label>
                   部門
@@ -207,6 +214,47 @@
                 <button type="button" id="equipmentCancelBtn" class="ghost" hidden>取消編輯</button>
                 <button type="button" id="equipmentResetBtn" class="ghost">清空</button>
                 <span id="equipmentMessage" role="status"></span>
+              </div>
+            </form>
+          </aside>
+        </div>
+      </div>
+
+      <div class="workspace-view" data-view="requester">
+        <div class="split-layout equipment-layout">
+          <section class="panel section-panel summary-panel" aria-label="使用者清單">
+            <div class="section-title">
+              <div>
+                <h2>使用者清單</h2>
+                <p>管理預約時可快速帶入的申請人、Email 與預設部門。</p>
+              </div>
+            </div>
+            <div id="requesterSummary" class="summary-grid"></div>
+          </section>
+
+          <aside class="panel section-panel admin-panel" aria-label="新增使用者">
+            <div class="section-title">
+              <div>
+                <h2>新增使用者</h2>
+                <p>新增後會直接寫入同一張 `requester_directory` 資料表。</p>
+              </div>
+            </div>
+            <form id="requesterForm" class="form-grid compact">
+              <label>
+                姓名
+                <input name="name" required placeholder="例如：Hank.Wu(吳金龍)">
+              </label>
+              <label>
+                Email
+                <input name="email" type="email" required placeholder="name@senao.com">
+              </label>
+              <label>
+                部門
+                <input name="department" value="PQE" required>
+              </label>
+              <div class="form-actions wide">
+                <button type="submit" class="secondary">新增使用者</button>
+                <span id="requesterMessage" role="status"></span>
               </div>
             </form>
           </aside>

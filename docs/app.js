@@ -10,6 +10,10 @@ const state = {
   weekStart: startOfWeek(new Date()),
   activeView: "reservation",
   editingEquipmentId: null,
+  requesterSuggestions: {
+    requester_name: [],
+    requester_email: [],
+  },
 };
 
 const statusText = {
@@ -40,9 +44,12 @@ function bindEvents() {
   document.getElementById("nextWeek").addEventListener("click", () => moveWeek(7));
   document.getElementById("reservationForm").addEventListener("submit", submitReservation);
   document.getElementById("equipmentForm").addEventListener("submit", submitEquipment);
+  document.getElementById("requesterForm").addEventListener("submit", submitRequester);
   document.getElementById("equipmentCancelBtn").addEventListener("click", cancelEquipmentEdit);
   document.getElementById("equipmentResetBtn").addEventListener("click", resetEquipmentForm);
+  document.querySelector("#reservationForm input[name='requester_name']").addEventListener("input", handleRequesterLookup);
   document.querySelector("#reservationForm input[name='requester_name']").addEventListener("change", syncRequesterFields);
+  document.querySelector("#reservationForm input[name='requester_email']").addEventListener("input", handleRequesterLookup);
   document.querySelector("#reservationForm input[name='requester_email']").addEventListener("change", syncRequesterFields);
 
   document.querySelectorAll("[data-view-target]").forEach((button) => {
@@ -192,6 +199,7 @@ function renderAll() {
   renderDashboardMetrics();
   renderEquipmentOptions();
   renderRequesterOptions();
+  renderRequesterSummary();
   renderEquipmentSummary();
   renderGantt();
   renderReservationRows();
@@ -212,6 +220,28 @@ function renderRequesterOptions() {
   emailList.innerHTML = state.requesters
     .map((item) => `<option value="${escapeHtml(item.email)}"></option>`)
     .join("");
+}
+
+function renderRequesterSummary() {
+  const root = document.getElementById("requesterSummary");
+  if (!root) return;
+
+  if (!state.requesters.length) {
+    root.innerHTML = '<article class="empty-card">尚未建立使用者名單，可從右側表單直接新增。</article>';
+    return;
+  }
+
+  root.innerHTML = state.requesters.map((item) => `
+    <article class="equipment-card requester-card">
+      <div>
+        <h3>${escapeHtml(item.name)}</h3>
+        <div class="equipment-card-meta">
+          <span>Email：${escapeHtml(item.email)}</span>
+          <span>部門：${escapeHtml(item.department || "PQE")}</span>
+        </div>
+      </div>
+    </article>
+  `).join("");
 }
 
 function renderConnectionState(forcedState = null) {
@@ -671,6 +701,49 @@ async function submitEquipment(event) {
   }
 }
 
+async function submitRequester(event) {
+  event.preventDefault();
+  assertClientReady();
+
+  const form = event.currentTarget;
+  const message = document.getElementById("requesterMessage");
+  const payload = Object.fromEntries(new FormData(form).entries());
+  const row = {
+    name: String(payload.name || "").trim(),
+    email: String(payload.email || "").trim(),
+    department: String(payload.department || "PQE").trim() || "PQE",
+  };
+
+  if (!row.name) {
+    message.textContent = "姓名不可空白。";
+    return;
+  }
+  if (!row.email) {
+    message.textContent = "Email 不可空白。";
+    return;
+  }
+
+  try {
+    const nextSort = (state.requesters.at(-1)?.sort_order || 0) + 10;
+    const { error } = await state.client
+      .from("requester_directory")
+      .insert({
+        ...row,
+        sort_order: nextSort,
+        is_active: true,
+      });
+
+    assertNoError(error, "使用者建立失敗");
+    message.textContent = "使用者已新增。";
+    form.reset();
+    form.elements.department.value = "PQE";
+    await loadRequesterDirectory();
+    renderAll();
+  } catch (error) {
+    message.textContent = error.message;
+  }
+}
+
 function equipmentMatchesPayload(equipment, payload) {
   return String(equipment.name) === String(payload.name)
     && String(equipment.category) === String(payload.category)
@@ -751,6 +824,65 @@ function setDefaultTimes() {
   form.elements.end_time.value = toDateTimeInput(end);
 }
 
+function handleRequesterLookup(event) {
+  const field = event.target.name;
+  const query = String(event.target.value || "").trim().toLowerCase();
+  const matches = !query
+    ? []
+    : state.requesters
+      .filter((item) => {
+        const haystack = `${item.name} ${item.email} ${item.department || ""}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .slice(0, 6);
+
+  state.requesterSuggestions[field] = matches;
+  renderRequesterLookup(field);
+}
+
+function renderRequesterLookup(field) {
+  const menuId = field === "requester_name" ? "requesterNameMatches" : "requesterEmailMatches";
+  const menu = document.getElementById(menuId);
+  if (!menu) return;
+
+  const matches = state.requesterSuggestions[field] || [];
+  if (!matches.length) {
+    menu.hidden = true;
+    menu.innerHTML = "";
+    return;
+  }
+
+  menu.hidden = false;
+  menu.innerHTML = matches.map((item, index) => `
+    <button
+      type="button"
+      class="typeahead-option"
+      data-requester-field="${field}"
+      data-requester-index="${index}">
+      <strong>${escapeHtml(item.name)}</strong>
+      <span>${escapeHtml(item.email)} / ${escapeHtml(item.department || "PQE")}</span>
+    </button>
+  `).join("");
+
+  menu.querySelectorAll("[data-requester-index]").forEach((button) => {
+    button.addEventListener("click", () => applyRequesterSuggestion(field, Number(button.dataset.requesterIndex)));
+  });
+}
+
+function applyRequesterSuggestion(field, index) {
+  const match = state.requesterSuggestions[field]?.[index];
+  if (!match) return;
+
+  const form = document.getElementById("reservationForm");
+  form.elements.requester_name.value = match.name;
+  form.elements.requester_email.value = match.email;
+  form.elements.department.value = match.department || "PQE";
+  state.requesterSuggestions.requester_name = [];
+  state.requesterSuggestions.requester_email = [];
+  renderRequesterLookup("requester_name");
+  renderRequesterLookup("requester_email");
+}
+
 function syncRequesterFields(event) {
   const form = document.getElementById("reservationForm");
   const nameInput = form.elements.requester_name;
@@ -768,6 +900,8 @@ function syncRequesterFields(event) {
     if (match && !departmentInput.value.trim()) {
       departmentInput.value = match.department || "PQE";
     }
+    state.requesterSuggestions.requester_name = [];
+    renderRequesterLookup("requester_name");
     return;
   }
 
@@ -779,6 +913,8 @@ function syncRequesterFields(event) {
     if (match && !departmentInput.value.trim()) {
       departmentInput.value = match.department || "PQE";
     }
+    state.requesterSuggestions.requester_email = [];
+    renderRequesterLookup("requester_email");
     return;
   }
 
