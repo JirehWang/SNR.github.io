@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>可靠度實驗室設備預約系統</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-copy">
+      <p class="eyebrow">Reliability Lab Reservation</p>
+      <h1>可靠度實驗室設備預約系統</h1>
+      <p>部門內設備預約、設備狀態維護與本週使用排程總覽。</p>
+    </div>
+    <div class="header-actions">
+      <button id="refreshBtn" class="secondary">重新整理</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="notice" aria-label="系統說明">
+      目前為部門內 MVP 版本，資料儲存在本機 SQLite，可先支援預約、查詢、設備狀態維護與簡易排程檢視。
+    </section>
+
+    <section class="panel dashboard-panel" aria-label="Dashboard">
+      <div class="section-title section-stack">
+        <div>
+          <h2>本週儀表板</h2>
+          <p>快速掌握設備總量、預約量與異常狀態。</p>
+        </div>
+      </div>
+      <div id="dashboardMetrics" class="metrics-grid"></div>
+    </section>
+
+    <section class="panel workspace-shell" aria-label="主要工作區">
+      <div class="workspace-nav" role="tablist" aria-label="功能分頁">
+        <button type="button" class="workspace-tab active" data-view-target="reservation" aria-selected="true">預約作業</button>
+        <button type="button" class="workspace-tab" data-view-target="equipment" aria-selected="false">設備管理</button>
+      </div>
+
+      <div class="workspace-view active" data-view="reservation">
+        <div class="split-layout reservation-layout">
+          <div class="main-column">
+            <section class="panel section-panel schedule-panel" aria-label="每週排程">
+              <div class="section-title with-controls">
+                <div>
+                  <h2>每週排程</h2>
+                  <p>以日曆欄位查看本週各日預約。</p>
+                </div>
+                <div class="week-controls">
+                  <button id="prevWeek" class="icon-btn" title="上一週" aria-label="上一週">&#8249;</button>
+                  <span id="weekLabel"></span>
+                  <button id="nextWeek" class="icon-btn" title="下一週" aria-label="下一週">&#8250;</button>
+                </div>
+              </div>
+              <div id="scheduleBoard" class="schedule-board"></div>
+            </section>
+
+            <section class="panel section-panel gantt-panel" aria-label="設備甘特圖">
+              <div class="section-title">
+                <div>
+                  <h2>設備使用狀況</h2>
+                  <p>依設備橫向檢視本週預約分布與占用情形。</p>
+                </div>
+              </div>
+              <div class="gantt-wrap">
+                <div id="ganttScale" class="gantt-scale"></div>
+                <div id="ganttChart" class="gantt-chart"></div>
+              </div>
+            </section>
+
+            <section class="panel section-panel list-panel" aria-label="預約清單">
+              <div class="section-title">
+                <div>
+                  <h2>預約清單</h2>
+                  <p>列出本週預約紀錄與取消操作。</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>設備</th>
+                      <th>時間</th>
+                      <th>申請人</th>
+                      <th>用途</th>
+                      <th>狀態</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="reservationRows"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <aside class="side-column">
+            <section class="panel section-panel reservation-panel" aria-label="新增預約">
+              <div class="section-title">
+                <div>
+                  <h2>新增預約</h2>
+                  <p>建立部門內設備借用申請。</p>
+                </div>
+              </div>
+              <form id="reservationForm" class="form-grid">
+                <label>
+                  設備
+                  <select name="equipment_id" required></select>
+                </label>
+                <label>
+                  申請人
+                  <input name="requester_name" required placeholder="請輸入姓名">
+                </label>
+                <label>
+                  Email
+                  <input name="requester_email" type="email" required placeholder="name@example.com">
+                </label>
+                <label>
+                  部門
+                  <input name="department" required value="可靠度實驗室">
+                </label>
+                <label>
+                  開始時間
+                  <input name="start_time" type="datetime-local" required>
+                </label>
+                <label>
+                  結束時間
+                  <input name="end_time" type="datetime-local" required>
+                </label>
+                <label class="wide">
+                  使用目的
+                  <select name="purpose" required>
+                    <option value="可靠度測試">可靠度測試</option>
+                    <option value="驗證分析">驗證分析</option>
+                    <option value="樣品準備">樣品準備</option>
+                    <option value="教育訓練">教育訓練</option>
+                    <option value="其他">其他</option>
+                  </select>
+                </label>
+                <label class="wide">
+                  備註
+                  <textarea name="notes" rows="3" placeholder="可填寫樣品資訊、測試條件或交接事項"></textarea>
+                </label>
+                <div class="form-actions wide">
+                  <button type="submit">送出預約</button>
+                  <span id="formMessage" role="status"></span>
+                </div>
+              </form>
+            </section>
+          </aside>
+        </div>
+      </div>
+
+      <div class="workspace-view" data-view="equipment">
+        <div class="split-layout equipment-layout">
+          <section class="panel section-panel summary-panel" aria-label="設備清單">
+            <div class="section-title">
+              <div>
+                <h2>設備清單</h2>
+                <p>點選編輯後可修改設備名稱、位置、容量、狀態與是否啟用。</p>
+              </div>
+            </div>
+            <div id="equipmentSummary" class="summary-grid"></div>
+          </section>
+
+          <aside class="panel section-panel admin-panel" aria-label="新增或編輯設備">
+            <div class="section-title">
+              <div>
+                <h2 id="equipmentFormTitle">新增/編輯設備資訊</h2>
+                <p>可建立新設備，或修改既有設備主檔資訊。</p>
+              </div>
+            </div>
+            <form id="equipmentForm" class="form-grid compact">
+              <input type="hidden" name="equipment_id">
+              <label>
+                設備名稱
+                <input name="name" required placeholder="例如：高低溫箱 B">
+              </label>
+              <label>
+                類別
+                <input name="category" required placeholder="例如：環測 / ESD / DROP">
+              </label>
+              <label>
+                位置
+                <input name="location" placeholder="例如：可靠度實驗室 1F">
+              </label>
+              <label>
+                容量
+                <input name="capacity" type="number" min="1" step="1" value="1" required>
+              </label>
+              <label>
+                狀態
+                <select name="status">
+                  <option value="available">可預約</option>
+                  <option value="validation">驗證中</option>
+                  <option value="maintenance">維修中</option>
+                  <option value="offline">停用</option>
+                </select>
+              </label>
+              <label>
+                啟用狀態
+                <select name="is_active">
+                  <option value="1">啟用</option>
+                  <option value="0">停用</option>
+                </select>
+              </label>
+              <div class="form-actions wide">
+                <button type="submit" id="equipmentSubmitBtn" class="secondary">新增設備</button>
+                <button type="button" id="equipmentCancelBtn" class="ghost" hidden>取消編輯</button>
+                <button type="button" id="equipmentResetBtn" class="ghost">清空</button>
+                <span id="equipmentMessage" role="status"></span>
+              </div>
+            </form>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <template id="dayTemplate">
+    <article class="day-column">
+      <h3></h3>
+      <div class="day-events"></div>
+    </article>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>
