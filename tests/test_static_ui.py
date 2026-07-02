@@ -2,8 +2,8 @@ import unittest
 from pathlib import Path
 
 
-STATIC = Path(__file__).resolve().parents[1] / "app" / "static"
 ROOT = Path(__file__).resolve().parents[1]
+STATIC = ROOT
 
 
 class StaticUiTestCase(unittest.TestCase):
