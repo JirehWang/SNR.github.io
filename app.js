@@ -397,8 +397,8 @@ function renderEquipmentSummary() {
         <div class="equipment-card-meta">
           <span>類別：${escapeHtml(item.category)}</span>
           <span>位置：${escapeHtml(item.location || "-")}</span>
-          <span>可重疊預約量：${escapeHtml(item.capacity)}</span>
-          <span>測試條件：${item.requires_test_condition ? "必填" : "非必填"}</span>
+          <span>容量：${escapeHtml(item.capacity || "-")}</span>
+          <span>測試條件：${isTruthyFlag(item.requires_test_condition) ? "必填" : "非必填"}</span>
         </div>
       </div>
       <div class="equipment-card-actions">
@@ -438,7 +438,7 @@ function syncEquipmentForm() {
     form.elements.name.value = "";
     form.elements.category.value = "";
     form.elements.location.value = "";
-    form.elements.capacity.value = "1";
+    form.elements.capacity.value = "";
     form.elements.requires_test_condition.value = "0";
     form.elements.status.value = "available";
     form.elements.is_active.value = "1";
@@ -457,8 +457,8 @@ function syncEquipmentForm() {
   form.elements.name.value = equipment.name;
   form.elements.category.value = equipment.category;
   form.elements.location.value = equipment.location || "";
-  form.elements.capacity.value = String(equipment.capacity || 1);
-  form.elements.requires_test_condition.value = equipment.requires_test_condition ? "1" : "0";
+  form.elements.capacity.value = String(equipment.capacity || "");
+  form.elements.requires_test_condition.value = isTruthyFlag(equipment.requires_test_condition) ? "1" : "0";
   form.elements.status.value = equipment.status;
   form.elements.is_active.value = equipment.is_active ? "1" : "0";
   message.textContent = "";
@@ -532,9 +532,10 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
     const label = document.createElement("div");
     label.className = `gantt-equipment-label${variant === "bulletin" ? " bulletin-cell" : ""}`;
     label.innerHTML = `
-      <strong>${escapeHtml(equipment.name)}</strong>
+      <button type="button" class="equipment-zoom-btn">${escapeHtml(equipment.name)}</button>
       <span>${escapeHtml(equipment.category)} / ${escapeHtml(statusText[equipment.status] || equipment.status)}</span>
     `;
+    label.querySelector(".equipment-zoom-btn").addEventListener("click", () => openEquipmentSchedule(equipment));
 
     const lane = document.createElement("div");
     lane.className = `gantt-lane${variant === "bulletin" ? " bulletin-lane" : ""}`;
@@ -547,19 +548,33 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
       reservation.status !== "cancelled"
     );
 
-    reservations.forEach((reservation) => {
+    const stackedReservations = layoutStackedReservations(reservations);
+    const visibleStackedReservations = getVisibleStackedReservations(stackedReservations, variant);
+    const laneSummary = getGanttLaneSummary(stackedReservations, visibleStackedReservations);
+
+    visibleStackedReservations.forEach((stacked) => {
+      const { reservation } = stacked;
       const bar = document.createElement("button");
       bar.type = "button";
-      bar.className = `gantt-bar${variant === "bulletin" ? " bulletin-bar" : ""}`;
-      bar.style.cssText = getGanttBarStyle(reservation);
+      bar.className = `gantt-bar compact-bar${variant === "bulletin" ? " bulletin-bar" : ""}`;
+      bar.style.cssText = getStackedGanttBarStyle(stacked, { variant, compact: true });
       bar.title = `${reservation.equipment_name} / ${reservation.project_name} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
       bar.innerHTML = `
-        <strong>${escapeHtml(reservation.requester_name)}</strong>
-        <span>${escapeHtml(reservation.project_name || "未填專案")}</span>
-        <em>${formatTime(reservation.start_time)}-${formatTime(reservation.end_time)}</em>
+        <strong>${escapeHtml(reservation.project_name || "未填專案")}</strong>
       `;
+      bar.addEventListener("click", () => openReservationDetail(reservation));
       lane.appendChild(bar);
     });
+
+    if (laneSummary.hiddenCount > 0) {
+      const overflow = document.createElement("button");
+      overflow.type = "button";
+      overflow.className = "gantt-overflow-chip";
+      overflow.textContent = `+${laneSummary.hiddenCount}`;
+      overflow.title = "開啟設備預約放大檢視";
+      overflow.addEventListener("click", () => openEquipmentSchedule(equipment));
+      lane.appendChild(overflow);
+    }
 
     if (reservations.length === 0) {
       const empty = document.createElement("span");
@@ -574,6 +589,43 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
   });
 }
 
+function layoutStackedReservations(reservations) {
+  const sorted = [...reservations].sort((a, b) => {
+    const startDiff = new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+    if (startDiff !== 0) return startDiff;
+    return new Date(a.end_time).getTime() - new Date(b.end_time).getTime();
+  });
+  const levelEndTimes = [];
+  const laidOut = sorted.map((reservation) => {
+    const start = new Date(reservation.start_time).getTime();
+    const end = new Date(reservation.end_time).getTime();
+    let level = levelEndTimes.findIndex((levelEnd) => start >= levelEnd);
+    if (level === -1) {
+      level = levelEndTimes.length;
+      levelEndTimes.push(end);
+    } else {
+      levelEndTimes[level] = end;
+    }
+    return { reservation, level, stackCount: 1 };
+  });
+  const stackCount = Math.max(levelEndTimes.length, 1);
+  laidOut.forEach((item) => {
+    item.stackCount = stackCount;
+  });
+  return laidOut;
+}
+
+function getVisibleStackedReservations(stackedReservations, variant = "default") {
+  const maxVisibleLevels = variant === "bulletin" ? 4 : 3;
+  return stackedReservations.filter((item) => item.level < maxVisibleLevels);
+}
+
+function getGanttLaneSummary(stackedReservations, visibleStackedReservations) {
+  return {
+    hiddenCount: Math.max(stackedReservations.length - visibleStackedReservations.length, 0),
+  };
+}
+
 function getGanttBarStyle(reservation) {
   const weekStart = state.weekStart.getTime();
   const weekEnd = addDays(state.weekStart, 7).getTime();
@@ -585,6 +637,275 @@ function getGanttBarStyle(reservation) {
   const left = ((clampedStart - weekStart) / total) * 100;
   const width = Math.max(((clampedEnd - clampedStart) / total) * 100, 1.4);
   return `left: ${left.toFixed(3)}%; width: ${width.toFixed(3)}%;`;
+}
+
+function getStackedGanttBarStyle(stacked, options = {}) {
+  const { variant = "default", zoom = false, compact = false } = options;
+  const baseStyle = getGanttBarStyle(stacked.reservation);
+  if (compact) {
+    const height = variant === "bulletin" ? 20 : 16;
+    const gap = variant === "bulletin" ? 4 : 3;
+    const top = variant === "bulletin" ? 10 + stacked.level * (height + gap) : 8 + stacked.level * (height + gap);
+    return `${baseStyle} top: ${top}px; height: ${height}px;`;
+  }
+
+  const hasOverlap = stacked.stackCount > 1;
+  const height = zoom ? 58 : variant === "bulletin" ? 70 : hasOverlap ? 40 : 56;
+  const gap = zoom ? 8 : variant === "bulletin" ? 8 : hasOverlap ? 6 : 0;
+  const top = zoom ? 12 + stacked.level * (height + gap) : variant === "bulletin" ? 14 + stacked.level * (height + gap) : 10 + stacked.level * (height + gap);
+  return `${baseStyle} top: ${top}px; height: ${height}px;`;
+}
+
+function openEquipmentSchedule(equipment) {
+  const dialog = document.getElementById("equipmentScheduleDialog");
+  if (!dialog) return;
+  renderEquipmentScheduleDialog(equipment);
+  dialog.showModal();
+}
+
+function renderEquipmentScheduleDialog(equipment) {
+  const title = document.getElementById("equipmentScheduleTitle");
+  const subtitle = document.getElementById("equipmentScheduleSubtitle");
+  const scale = document.getElementById("equipmentScheduleScale");
+  const chart = document.getElementById("equipmentScheduleChart");
+  const list = document.getElementById("equipmentScheduleList");
+  if (!title || !subtitle || !scale || !chart || !list) return;
+
+  const reservations = state.reservations.filter((reservation) =>
+    Number(reservation.equipment_id) === Number(equipment.id) &&
+    reservation.status !== "cancelled"
+  );
+  const stackedReservations = layoutStackedReservations(reservations);
+  title.textContent = equipment.name || "設備預約放大檢視";
+  subtitle.textContent = `${equipment.category || "-"} / ${formatDate(state.weekStart)} - ${formatDate(addDays(state.weekStart, 6))}`;
+  scale.innerHTML = "";
+  chart.innerHTML = "";
+
+  for (let offset = 0; offset < 7; offset += 1) {
+    const date = addDays(state.weekStart, offset);
+    const tick = document.createElement("div");
+    tick.className = "equipment-schedule-day";
+    tick.textContent = `${dayNames[date.getDay()]} ${formatDate(date)}`;
+    scale.appendChild(tick);
+  }
+
+  const lane = document.createElement("div");
+  lane.className = "equipment-schedule-lane";
+  lane.style.minHeight = `${Math.max(32 + Math.max(stackedReservations[0]?.stackCount || 1, 1) * 66, 128)}px`;
+
+  stackedReservations.forEach((stacked) => {
+    const reservation = stacked.reservation;
+    const bar = document.createElement("button");
+    bar.type = "button";
+    bar.className = "gantt-bar equipment-schedule-bar";
+    bar.style.cssText = getStackedGanttBarStyle(stacked, { zoom: true });
+    bar.title = `${reservation.equipment_name} / ${reservation.project_name} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
+    bar.innerHTML = `
+      <strong>${escapeHtml(reservation.project_name || "未填專案")}</strong>
+      <span>${escapeHtml(reservation.requester_name || "-")}</span>
+      <em>${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}</em>
+    `;
+    bar.addEventListener("click", () => openReservationDetail(reservation));
+    lane.appendChild(bar);
+  });
+
+  if (!stackedReservations.length) {
+    const empty = document.createElement("span");
+    empty.className = "gantt-empty";
+    empty.textContent = "本週沒有預約";
+    lane.appendChild(empty);
+  }
+
+  chart.appendChild(lane);
+  list.innerHTML = reservations.length
+    ? reservations.map((reservation) => `
+      <button type="button" class="equipment-schedule-list-item" data-reservation-id="${escapeHtml(reservation.id)}">
+        <strong>${escapeHtml(reservation.project_name || "未填專案")}</strong>
+        <span>${escapeHtml(reservation.requester_name || "-")} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}</span>
+      </button>
+    `).join("")
+    : '<div class="empty-card">本週沒有預約</div>';
+  list.querySelectorAll("[data-reservation-id]").forEach((button) => {
+    const reservation = reservations.find((item) => String(item.id) === String(button.dataset.reservationId));
+    if (reservation) {
+      button.addEventListener("click", () => openReservationDetail(reservation));
+    }
+  });
+}
+
+function openReservationDetail(reservation) {
+  const dialog = document.getElementById("reservationDetailDialog");
+  const title = document.getElementById("reservationDetailTitle");
+  const subtitle = document.getElementById("reservationDetailSubtitle");
+  const body = document.getElementById("reservationDetailBody");
+  const copyButton = document.getElementById("reservationDetailCopyBtn");
+  const status = document.getElementById("reservationDetailCopyStatus");
+  if (!dialog || !title || !subtitle || !body || !copyButton || !status) return;
+
+  title.textContent = reservation.project_name || "預約明細";
+  subtitle.textContent = `${reservation.equipment_name || "-"} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
+  body.innerHTML = getReservationDetailRows(reservation).map(([label, value]) => `
+    <div class="detail-item">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || "-")}</strong>
+    </div>
+  `).join("");
+  status.textContent = "";
+  copyButton.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(getReservationDetailText(reservation));
+      status.textContent = "已複製";
+    } catch (error) {
+      status.textContent = "複製失敗，請手動選取";
+    }
+  };
+  configureReservationEdit(reservation);
+  dialog.showModal();
+}
+
+function configureReservationEdit(reservation) {
+  const emailInput = document.getElementById("reservationEditEmail");
+  const unlockButton = document.getElementById("reservationEditUnlockBtn");
+  const projectInput = document.getElementById("reservationEditProject");
+  const startInput = document.getElementById("reservationEditStart");
+  const endInput = document.getElementById("reservationEditEnd");
+  const saveButton = document.getElementById("reservationEditSaveBtn");
+  const message = document.getElementById("reservationEditMessage");
+  if (!emailInput || !unlockButton || !projectInput || !startInput || !endInput || !saveButton || !message) return;
+
+  emailInput.value = "";
+  projectInput.value = reservation.project_name || "";
+  startInput.value = toDateTimeInput(new Date(reservation.start_time));
+  endInput.value = toDateTimeInput(new Date(reservation.end_time));
+  message.textContent = "";
+  setReservationEditUnlocked(false);
+  unlockButton.onclick = () => unlockReservationEdit(reservation);
+  saveButton.onclick = () => saveReservationEdit(reservation);
+}
+
+function setReservationEditUnlocked(isUnlocked) {
+  const projectInput = document.getElementById("reservationEditProject");
+  const startInput = document.getElementById("reservationEditStart");
+  const endInput = document.getElementById("reservationEditEnd");
+  const saveButton = document.getElementById("reservationEditSaveBtn");
+  [projectInput, startInput, endInput, saveButton].forEach((node) => {
+    if (node) node.disabled = !isUnlocked;
+  });
+}
+
+function unlockReservationEdit(reservation) {
+  const emailInput = document.getElementById("reservationEditEmail");
+  const message = document.getElementById("reservationEditMessage");
+  if (!emailInput || !message) return;
+
+  if (!emailMatchesReservation(emailInput.value, reservation)) {
+    setReservationEditUnlocked(false);
+    message.textContent = "Email 不符合此筆預約者，無法解鎖。";
+    return;
+  }
+
+  setReservationEditUnlocked(true);
+  message.textContent = "已解鎖，可修改專案名稱與縮短預約時間。";
+}
+
+function emailMatchesReservation(email, reservation) {
+  return String(email || "").trim().toLowerCase() === String(reservation.requester_email || "").trim().toLowerCase();
+}
+
+function validateShortenedReservationWindow(reservation, startIso, endIso) {
+  const originalStart = new Date(reservation.start_time).getTime();
+  const originalEnd = new Date(reservation.end_time).getTime();
+  const nextStart = new Date(startIso).getTime();
+  const nextEnd = new Date(endIso).getTime();
+
+  if (!Number.isFinite(nextStart) || !Number.isFinite(nextEnd)) {
+    throw new Error("請輸入有效的開始與結束時間。");
+  }
+  if (nextEnd <= nextStart) {
+    throw new Error("結束時間必須晚於開始時間。");
+  }
+  if (nextStart < originalStart || nextEnd > originalEnd) {
+    throw new Error("預約時間只能縮短，不能早於原開始時間或晚於原結束時間。");
+  }
+}
+
+async function saveReservationEdit(reservation) {
+  assertClientReady();
+  const projectInput = document.getElementById("reservationEditProject");
+  const startInput = document.getElementById("reservationEditStart");
+  const endInput = document.getElementById("reservationEditEnd");
+  const message = document.getElementById("reservationEditMessage");
+  const dialog = document.getElementById("reservationDetailDialog");
+  if (!projectInput || !startInput || !endInput || !message) return;
+
+  const projectName = String(projectInput.value || "").trim();
+  if (!projectName) {
+    message.textContent = "請輸入專案名稱。";
+    return;
+  }
+
+  try {
+    const startIso = localInputToIso(startInput.value);
+    const endIso = localInputToIso(endInput.value);
+    validateShortenedReservationWindow(reservation, startIso, endIso);
+
+    const patch = {
+      project_name: projectName,
+      start_time: startIso,
+      end_time: endIso,
+    };
+
+    const { data: updated, error: updateError } = await state.client
+      .from("reservations")
+      .update(patch)
+      .eq("id", reservation.id)
+      .select()
+      .single();
+    assertNoError(updateError, "更新預約失敗");
+
+    const { error: historyError } = await state.client
+      .from("reservation_history")
+      .insert({
+        reservation_id: reservation.id,
+        action: "updated",
+        old_value: reservation,
+        new_value: updated,
+        changed_by_name: reservation.requester_name,
+      });
+    assertNoError(historyError, "寫入預約歷程失敗");
+
+    message.textContent = "預約已更新。";
+    await loadReservations();
+    renderAll();
+    dialog?.close();
+  } catch (error) {
+    message.textContent = error.message;
+  }
+}
+
+function getReservationDetailRows(reservation) {
+  return [
+    ["設備", reservation.equipment_name],
+    ["設備類別", reservation.equipment_category],
+    ["專案名稱", reservation.project_name],
+    ["申請人", reservation.requester_name],
+    ["Email", reservation.requester_email],
+    ["部門", reservation.department],
+    ["使用目的", reservation.purpose],
+    ["測試條件", reservation.test_condition],
+    ["開始時間", formatDateTime(reservation.start_time)],
+    ["結束時間", formatDateTime(reservation.end_time)],
+    ["狀態", statusText[reservation.status] || reservation.status],
+    ["備註", reservation.notes],
+    ["取消原因", reservation.cancel_reason],
+    ["預約編號", reservation.id],
+  ];
+}
+
+function getReservationDetailText(reservation) {
+  return getReservationDetailRows(reservation)
+    .map(([label, value]) => `${label}: ${value || "-"}`)
+    .join("\n");
 }
 
 function renderReservationRows() {
@@ -652,7 +973,7 @@ async function submitReservation(event) {
     if (!equipment || !equipment.is_active || equipment.status !== "available") {
       throw new Error("目前設備狀態不可預約。");
     }
-    if (equipment.requires_test_condition && !String(payload.test_condition || "").trim()) {
+    if (isTruthyFlag(equipment.requires_test_condition) && !String(payload.test_condition || "").trim()) {
       throw new Error("此設備預約時必須填寫測試條件。");
     }
 
@@ -665,8 +986,9 @@ async function submitReservation(event) {
       .gt("end_time", startIso);
 
     assertNoError(conflictError, "讀取預約衝突失敗");
-    if ((conflicts?.length || 0) >= Number(equipment.capacity || 1)) {
-      throw new Error(`此設備於該時段的可重疊預約量已滿（上限 ${equipment.capacity || 1}）。`);
+    const capacityLimit = parseEquipmentCapacityLimit(equipment.capacity);
+    if ((conflicts?.length || 0) >= capacityLimit) {
+      throw new Error(`此設備於該時段的可重疊預約量已滿（上限 ${equipment.capacity || capacityLimit}）。`);
     }
 
     const reservationRow = {
@@ -726,7 +1048,7 @@ async function submitEquipment(event) {
     name: String(payload.name || "").trim(),
     category: String(payload.category || "").trim(),
     location: String(payload.location || "").trim(),
-    capacity: Number(payload.capacity || 1),
+    capacity: String(payload.capacity || "").trim(),
     requires_test_condition: String(payload.requires_test_condition || "0") === "1",
     status: String(payload.status || "available"),
     is_active: String(payload.is_active || "1") === "1",
@@ -740,11 +1062,6 @@ async function submitEquipment(event) {
     message.textContent = "請填寫設備類別。";
     return;
   }
-  if (row.capacity < 1) {
-    message.textContent = "可重疊預約量至少需為 1。";
-    return;
-  }
-
   try {
     if (equipmentId) {
       const { error } = await state.client
@@ -965,10 +1282,10 @@ function equipmentMatchesPayload(equipment, payload) {
   return String(equipment.name) === String(payload.name)
     && String(equipment.category) === String(payload.category)
     && String(equipment.location || "") === String(payload.location || "")
-    && Number(equipment.capacity) === Number(payload.capacity)
+    && String(equipment.capacity || "") === String(payload.capacity || "")
     && String(equipment.status) === String(payload.status)
-    && Boolean(equipment.is_active) === Boolean(payload.is_active)
-    && Boolean(equipment.requires_test_condition) === Boolean(payload.requires_test_condition);
+    && isTruthyFlag(equipment.is_active) === isTruthyFlag(payload.is_active)
+    && isTruthyFlag(equipment.requires_test_condition) === isTruthyFlag(payload.requires_test_condition);
 }
 
 async function cancelReservation(reservation) {
@@ -1108,6 +1425,22 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(Math.max(parsed, min), max);
 }
 
+function isTruthyFlag(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "y"].includes(value.trim().toLowerCase());
+  }
+  return false;
+}
+
+function parseEquipmentCapacityLimit(value) {
+  const match = String(value || "").match(/\d+/);
+  const parsed = match ? Number(match[0]) : 1;
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.floor(parsed);
+}
+
 function setDefaultTimes() {
   const form = document.getElementById("reservationForm");
   const now = new Date();
@@ -1132,9 +1465,10 @@ function syncReservationEquipmentState() {
   const input = form.elements.test_condition;
   if (!field || !input) return;
 
-  const requiresTestCondition = Boolean(equipment?.requires_test_condition);
+  const requiresTestCondition = isTruthyFlag(equipment?.requires_test_condition);
   field.hidden = !requiresTestCondition;
   input.required = requiresTestCondition;
+  input.disabled = !requiresTestCondition;
   if (!requiresTestCondition) {
     input.value = "";
   }

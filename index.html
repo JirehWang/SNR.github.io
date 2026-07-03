@@ -196,7 +196,7 @@
               </label>
               <label>
                 可重疊預約量
-                <input name="capacity" type="number" min="1" step="1" value="1" required>
+                <input name="capacity" type="text" placeholder="例如：2 / 2槽 / 4 channels">
               </label>
               <label>
                 預約需填測試條件
@@ -319,6 +319,67 @@
       </div>
     </section>
   </main>
+
+  <dialog id="reservationDetailDialog" class="reservation-detail-dialog">
+    <form method="dialog" class="reservation-detail-shell">
+      <div class="dialog-header">
+        <div>
+          <h2 id="reservationDetailTitle">預約明細</h2>
+          <p id="reservationDetailSubtitle"></p>
+        </div>
+        <button type="submit" class="ghost">關閉</button>
+      </div>
+      <div id="reservationDetailBody" class="detail-grid"></div>
+      <section class="reservation-edit-panel" aria-label="修改預約">
+        <div class="reservation-edit-lock">
+          <label>
+            輸入預約者 Email 解鎖修改
+            <input id="reservationEditEmail" type="email" autocomplete="off" placeholder="name@example.com">
+          </label>
+          <button type="button" id="reservationEditUnlockBtn" class="secondary">解鎖</button>
+        </div>
+        <div class="reservation-edit-grid">
+          <label>
+            專案名稱
+            <input id="reservationEditProject" disabled>
+          </label>
+          <label>
+            開始時間
+            <input id="reservationEditStart" type="datetime-local" disabled>
+          </label>
+          <label>
+            結束時間
+            <input id="reservationEditEnd" type="datetime-local" disabled>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="reservationEditSaveBtn" class="secondary" disabled>儲存修改</button>
+          <span id="reservationEditMessage" role="status"></span>
+        </div>
+      </section>
+      <div class="form-actions">
+        <button type="button" id="reservationDetailCopyBtn" class="secondary">複製明細</button>
+        <span id="reservationDetailCopyStatus" role="status"></span>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="equipmentScheduleDialog" class="equipment-schedule-dialog">
+    <form method="dialog" class="equipment-schedule-shell">
+      <div class="dialog-header">
+        <div>
+          <h2 id="equipmentScheduleTitle">設備預約放大檢視</h2>
+          <p id="equipmentScheduleSubtitle"></p>
+        </div>
+        <button type="submit" class="ghost">關閉</button>
+      </div>
+      <div class="equipment-schedule-wrap">
+        <div id="equipmentScheduleScale" class="equipment-schedule-scale"></div>
+        <div id="equipmentScheduleChart" class="equipment-schedule-chart"></div>
+      </div>
+      <div id="equipmentScheduleList" class="equipment-schedule-list"></div>
+    </form>
+  </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./app.js"></script>

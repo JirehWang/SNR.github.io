@@ -20,6 +20,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -710,9 +714,25 @@ textarea:focus {
   background: #fbfdff;
 }
 
-.gantt-equipment-label strong {
+.equipment-zoom-btn {
+  width: fit-content;
+  min-height: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #0f172a;
+  padding: 0;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 800;
   font-size: 14px;
   line-height: 1.25;
+}
+
+.equipment-zoom-btn:hover,
+.equipment-zoom-btn:focus-visible {
+  background: transparent;
+  color: var(--brand);
+  text-decoration: underline;
 }
 
 .gantt-equipment-label span {
@@ -757,8 +777,21 @@ textarea:focus {
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
 }
 
+.gantt-bar.compact-bar {
+  min-width: 42px;
+  min-height: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  box-shadow: none;
+}
+
 .gantt-bar:hover {
   background: #1d4ed8;
+}
+
+.gantt-bar:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 2px;
 }
 
 .bulletin-bar {
@@ -778,6 +811,17 @@ textarea:focus {
 
 .gantt-bar strong {
   font-size: 12px;
+  font-weight: 800;
+}
+
+.compact-bar strong {
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.compact-bar span,
+.compact-bar em {
+  display: none;
 }
 
 .gantt-bar span {
@@ -795,6 +839,10 @@ textarea:focus {
   font-size: 16px;
 }
 
+.bulletin-bar.compact-bar strong {
+  font-size: 12px;
+}
+
 .bulletin-bar span {
   font-size: 14px;
 }
@@ -809,6 +857,208 @@ textarea:focus {
   left: 14px;
   color: #94a3b8;
   font-size: 13px;
+}
+
+.gantt-overflow-chip {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  min-height: 22px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #0f172a;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.gantt-overflow-chip:hover,
+.gantt-overflow-chip:focus-visible {
+  background: #cbd5e1;
+}
+
+.reservation-detail-dialog {
+  width: min(720px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.equipment-schedule-dialog {
+  width: min(1120px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.reservation-detail-dialog::backdrop,
+.equipment-schedule-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.reservation-detail-shell,
+.equipment-schedule-shell {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.dialog-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dialog-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-item {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  padding: 10px;
+}
+
+.detail-item span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detail-item strong {
+  display: block;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reservation-edit-panel {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.reservation-edit-lock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.reservation-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.reservation-edit-panel input:disabled {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.equipment-schedule-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.equipment-schedule-scale {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(120px, 1fr));
+  min-width: 840px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+}
+
+.equipment-schedule-day {
+  min-height: 42px;
+  border-right: 1px solid var(--line);
+  padding: 11px 8px;
+  color: #334155;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.equipment-schedule-day:last-child {
+  border-right: 0;
+}
+
+.equipment-schedule-chart {
+  min-width: 840px;
+}
+
+.equipment-schedule-lane {
+  position: relative;
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc((100% / 7) - 1px),
+      #e2e8f0 calc((100% / 7) - 1px),
+      #e2e8f0 calc(100% / 7)
+    );
+}
+
+.equipment-schedule-bar {
+  min-width: 92px;
+}
+
+.equipment-schedule-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.equipment-schedule-list-item {
+  display: grid;
+  gap: 3px;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--text);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.equipment-schedule-list-item:hover {
+  background: #eef5ff;
+}
+
+.equipment-schedule-list-item strong,
+.equipment-schedule-list-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.equipment-schedule-list-item span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .table-wrap {
@@ -953,6 +1203,19 @@ td:nth-child(6) {
 @media (max-width: 560px) {
   .metrics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reservation-edit-lock,
+  .reservation-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dialog-header {
+    display: grid;
   }
 
   .equipment-card {
