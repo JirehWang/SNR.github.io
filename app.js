@@ -34,7 +34,7 @@ const statusText = {
   offline: "停用",
   cancelled: "已取消",
   checked_in: "已啟用",
-  checked_out: "已結案",
+  checked_out: "已完成",
 };
 
 statusText.validation = "驗證中";
@@ -319,7 +319,10 @@ function renderViewState() {
 
 function renderDashboardMetrics() {
   const root = document.getElementById("dashboardMetrics");
-  const activeReservations = state.reservations.filter((item) => item.status !== "cancelled");
+  const activeReservations = state.reservations.filter((item) => {
+    const effectiveStatus = getEffectiveReservationStatus(item);
+    return effectiveStatus !== "cancelled" && effectiveStatus !== "checked_out";
+  });
   const available = state.equipment.filter((item) => item.status === "available" && item.is_active).length;
   const validation = state.equipment.filter((item) => item.status === "validation" && item.is_active).length;
   const maintenance = state.equipment.filter((item) => item.status === "maintenance" && item.is_active).length;
@@ -355,9 +358,10 @@ function renderEquipmentOptions() {
   state.equipment
     .filter((item) => item.is_active && item.status === "available")
     .forEach((item) => {
+      const view = getEquipmentViewModel(item);
       const option = document.createElement("option");
-      option.value = item.id;
-      option.textContent = `${item.name} (${item.category})`;
+      option.value = view.id;
+      option.textContent = view.optionText;
       select.appendChild(option);
     });
 
@@ -375,6 +379,25 @@ function renderEquipmentOptions() {
   syncReservationEquipmentState();
 }
 
+function getEquipmentViewModel(equipment) {
+  const status = equipment.status || "offline";
+  const statusLabel = statusText[status] || status;
+  return {
+    id: equipment.id,
+    name: equipment.name || "-",
+    category: equipment.category || "-",
+    location: equipment.location || "-",
+    capacity: equipment.capacity || "-",
+    status,
+    statusLabel,
+    isActive: isTruthyFlag(equipment.is_active),
+    requiresTestCondition: isTruthyFlag(equipment.requires_test_condition),
+    requiresTestConditionLabel: isTruthyFlag(equipment.requires_test_condition) ? "必填" : "非必填",
+    labelText: `${equipment.category || "-"} / ${statusLabel}`,
+    optionText: `${equipment.name || "-"} (${equipment.category || "-"})`,
+  };
+}
+
 function renderEquipmentSummary() {
   const root = document.getElementById("equipmentSummary");
   root.innerHTML = "";
@@ -385,24 +408,25 @@ function renderEquipmentSummary() {
   }
 
   state.equipment.forEach((item) => {
+    const view = getEquipmentViewModel(item);
     const card = document.createElement("article");
     card.className = "equipment-card";
     card.innerHTML = `
       <div>
-        <h3>${escapeHtml(item.name)}</h3>
+        <h3>${escapeHtml(view.name)}</h3>
         <div class="equipment-state">
-          <span class="badge ${escapeHtml(item.status)}">${escapeHtml(statusText[item.status] || item.status)}</span>
-          ${item.is_active ? "" : '<span class="badge inactive">停用</span>'}
+          <span class="badge ${escapeHtml(view.status)}">${escapeHtml(view.statusLabel)}</span>
+          ${view.isActive ? "" : '<span class="badge inactive">停用</span>'}
         </div>
         <div class="equipment-card-meta">
-          <span>類別：${escapeHtml(item.category)}</span>
-          <span>位置：${escapeHtml(item.location || "-")}</span>
-          <span>容量：${escapeHtml(item.capacity || "-")}</span>
-          <span>測試條件：${isTruthyFlag(item.requires_test_condition) ? "必填" : "非必填"}</span>
+          <span>類別：${escapeHtml(view.category)}</span>
+          <span>位置：${escapeHtml(view.location)}</span>
+          <span>容量：${escapeHtml(view.capacity)}</span>
+          <span>測試條件：${escapeHtml(view.requiresTestConditionLabel)}</span>
         </div>
       </div>
       <div class="equipment-card-actions">
-        <button type="button" class="secondary equipment-edit-btn" data-edit-equipment="${item.id}">編輯</button>
+        <button type="button" class="secondary equipment-edit-btn" data-edit-equipment="${view.id}">編輯</button>
       </div>
     `;
 
@@ -526,14 +550,15 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
   }
 
   state.equipment.forEach((equipment) => {
+    const equipmentView = getEquipmentViewModel(equipment);
     const row = document.createElement("div");
     row.className = `gantt-row${variant === "bulletin" ? " bulletin-row" : ""}`;
 
     const label = document.createElement("div");
     label.className = `gantt-equipment-label${variant === "bulletin" ? " bulletin-cell" : ""}`;
     label.innerHTML = `
-      <button type="button" class="equipment-zoom-btn">${escapeHtml(equipment.name)}</button>
-      <span>${escapeHtml(equipment.category)} / ${escapeHtml(statusText[equipment.status] || equipment.status)}</span>
+      <button type="button" class="equipment-zoom-btn">${escapeHtml(equipmentView.name)}</button>
+      <span>${escapeHtml(equipmentView.labelText)}</span>
     `;
     label.querySelector(".equipment-zoom-btn").addEventListener("click", () => openEquipmentSchedule(equipment));
 
@@ -551,17 +576,40 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
     const stackedReservations = layoutStackedReservations(reservations);
     const visibleStackedReservations = getVisibleStackedReservations(stackedReservations, variant);
     const laneSummary = getGanttLaneSummary(stackedReservations, visibleStackedReservations);
+    const mainGanttMetrics = variant === "default"
+      ? getDefaultGanttMetrics(Math.max(stackedReservations[0]?.stackCount || 1, 1))
+      : null;
+
+    if (mainGanttMetrics) {
+      row.style.minHeight = `${mainGanttMetrics.rowHeight}px`;
+      row.style.height = `${mainGanttMetrics.rowHeight}px`;
+      lane.style.minHeight = `${mainGanttMetrics.rowHeight}px`;
+      lane.style.height = `${mainGanttMetrics.rowHeight}px`;
+    }
 
     visibleStackedReservations.forEach((stacked) => {
       const { reservation } = stacked;
+      const view = getReservationViewModel(reservation);
       const bar = document.createElement("button");
       bar.type = "button";
-      bar.className = `gantt-bar compact-bar${variant === "bulletin" ? " bulletin-bar" : ""}`;
-      bar.style.cssText = getStackedGanttBarStyle(stacked, { variant, compact: true });
-      bar.title = `${reservation.equipment_name} / ${reservation.project_name} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
+      const textMode = mainGanttMetrics?.textMode || "project";
+      bar.className = [
+        "gantt-bar",
+        variant === "bulletin" ? "compact-bar bulletin-bar" : "",
+        variant === "default" && textMode === "project" ? "project-only" : "",
+        variant === "default" && textMode === "project-requester" ? "project-requester" : "",
+        view.effectiveStatus === "checked_out" ? "is-complete" : "",
+      ].filter(Boolean).join(" ");
+      bar.style.cssText = mainGanttMetrics
+        ? `${getGanttBarStyle(stacked.reservation, { gapPx: stacked.fillsToDayEnd ? 0 : 3, visualEndTime: stacked.visualEndTime })} top: ${mainGanttMetrics.top + stacked.level * (mainGanttMetrics.barHeight + mainGanttMetrics.gap)}px; height: ${mainGanttMetrics.barHeight}px;`
+        : getStackedGanttBarStyle(stacked, { variant, compact: true });
+      bar.title = view.titleText;
       bar.innerHTML = `
-        <strong>${escapeHtml(reservation.project_name || "未填專案")}</strong>
+        <strong>${escapeHtml(view.projectName)}</strong>
       `;
+      if (variant === "default") {
+        bar.innerHTML = getMainGanttBarMarkup(reservation, textMode);
+      }
       bar.addEventListener("click", () => openReservationDetail(reservation));
       lane.appendChild(bar);
     });
@@ -612,12 +660,82 @@ function layoutStackedReservations(reservations) {
   laidOut.forEach((item) => {
     item.stackCount = stackCount;
   });
+  applyRightEdgeFill(laidOut);
   return laidOut;
 }
 
+function applyRightEdgeFill(stackedReservations) {
+  const weekStart = state.weekStart.getTime();
+  const weekEnd = addDays(state.weekStart, 7).getTime();
+  const groups = new Map();
+
+  stackedReservations.forEach((item) => {
+    const start = Math.max(new Date(item.reservation.start_time).getTime(), weekStart);
+    const end = Math.min(new Date(item.reservation.end_time).getTime(), weekEnd);
+    const dayIndex = Math.min(Math.max(Math.floor((start - weekStart) / 86400000), 0), 6);
+    const key = `${item.level}:${dayIndex}`;
+    item.visualEndTime = end;
+    item.fillsToDayEnd = false;
+    if (!isSingleDayReservation(item.reservation)) {
+      return;
+    }
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ item, end, dayIndex });
+  });
+
+  groups.forEach((group) => {
+    const rightMostEnd = Math.max(...group.map((entry) => entry.end));
+    const dayEnd = Math.min(weekStart + (group[0].dayIndex + 1) * 86400000, weekEnd);
+    group
+      .filter((entry) => entry.end === rightMostEnd)
+      .forEach((entry) => {
+        entry.item.visualEndTime = dayEnd;
+        entry.item.fillsToDayEnd = true;
+      });
+  });
+}
+
+function isSingleDayReservation(reservation) {
+  const start = new Date(reservation.start_time);
+  const end = new Date(reservation.end_time);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return false;
+  return start.getFullYear() === end.getFullYear()
+    && start.getMonth() === end.getMonth()
+    && start.getDate() === end.getDate();
+}
+
 function getVisibleStackedReservations(stackedReservations, variant = "default") {
-  const maxVisibleLevels = variant === "bulletin" ? 4 : 3;
+  const maxVisibleLevels = variant === "bulletin" ? 4 : 5;
   return stackedReservations.filter((item) => item.level < maxVisibleLevels);
+}
+
+function getDefaultGanttMetrics(stackCount = 1) {
+  const clampedStackCount = Math.min(Math.max(Number(stackCount) || 1, 1), 5);
+  const gap = 3;
+  const verticalPadding = clampedStackCount === 1 ? 14 : 2;
+  const rowHeight = clampedStackCount === 1 ? 76 : 90;
+  const availableHeight = rowHeight - verticalPadding * 2;
+  const preferredHeight = 48;
+  const preferredTotalHeight = preferredHeight * clampedStackCount + gap * (clampedStackCount - 1);
+  const barHeight = clampedStackCount === 1
+    ? preferredHeight
+    : preferredTotalHeight <= availableHeight
+      ? preferredHeight
+      : Math.max(12, Math.floor((availableHeight - gap * (clampedStackCount - 1)) / clampedStackCount));
+  const top = verticalPadding;
+  let textMode = "full";
+  if (barHeight < 28) {
+    textMode = "project";
+  } else if (barHeight < 38) {
+    textMode = "project-requester";
+  }
+  return {
+    rowHeight,
+    barHeight,
+    gap,
+    top,
+    textMode,
+  };
 }
 
 function getGanttLaneSummary(stackedReservations, visibleStackedReservations) {
@@ -626,22 +744,26 @@ function getGanttLaneSummary(stackedReservations, visibleStackedReservations) {
   };
 }
 
-function getGanttBarStyle(reservation) {
+function getGanttBarStyle(reservation, options = {}) {
+  const { gapPx = 0, visualEndTime = null } = options;
   const weekStart = state.weekStart.getTime();
   const weekEnd = addDays(state.weekStart, 7).getTime();
   const reservationStart = new Date(reservation.start_time).getTime();
-  const reservationEnd = new Date(reservation.end_time).getTime();
+  const reservationEnd = visualEndTime ? new Date(visualEndTime).getTime() : new Date(reservation.end_time).getTime();
   const clampedStart = Math.max(reservationStart, weekStart);
   const clampedEnd = Math.min(reservationEnd, weekEnd);
   const total = weekEnd - weekStart;
   const left = ((clampedStart - weekStart) / total) * 100;
   const width = Math.max(((clampedEnd - clampedStart) / total) * 100, 1.4);
+  if (gapPx > 0) {
+    return `left: ${left.toFixed(3)}%; width: calc(${width.toFixed(3)}% - ${gapPx}px);`;
+  }
   return `left: ${left.toFixed(3)}%; width: ${width.toFixed(3)}%;`;
 }
 
 function getStackedGanttBarStyle(stacked, options = {}) {
   const { variant = "default", zoom = false, compact = false } = options;
-  const baseStyle = getGanttBarStyle(stacked.reservation);
+  const baseStyle = getGanttBarStyle(stacked.reservation, { visualEndTime: stacked.visualEndTime });
   if (compact) {
     const height = variant === "bulletin" ? 20 : 16;
     const gap = variant === "bulletin" ? 4 : 3;
@@ -656,6 +778,97 @@ function getStackedGanttBarStyle(stacked, options = {}) {
   return `${baseStyle} top: ${top}px; height: ${height}px;`;
 }
 
+function getMainGanttBarMarkup(reservation, textMode) {
+  const view = getReservationViewModel(reservation);
+  const projectName = escapeHtml(view.projectName);
+  const requesterName = escapeHtml(view.requesterName);
+  const timeRange = view.timeRange;
+
+  if (textMode === "none") {
+    return "";
+  }
+
+  if (textMode === "project") {
+    return `<strong>${projectName}</strong>`;
+  }
+
+  if (textMode === "project-requester") {
+    return `
+      <strong>${projectName}</strong>
+      <span>${requesterName}</span>
+    `;
+  }
+
+  return `
+    <strong>${projectName}</strong>
+    <span>${requesterName}</span>
+    <em>${timeRange}</em>
+  `;
+}
+
+function getEffectiveReservationStatus(reservation, now = new Date()) {
+  if (reservation.status === "cancelled") return "cancelled";
+  if (reservation.status === "checked_out") return "checked_out";
+  const end = new Date(reservation.end_time).getTime();
+  if (Number.isFinite(end) && end <= now.getTime()) return "checked_out";
+  return reservation.status || "reserved";
+}
+
+function canCompleteReservation(reservation, now = new Date()) {
+  const effectiveStatus = getEffectiveReservationStatus(reservation, now);
+  const start = new Date(reservation.start_time).getTime();
+  return effectiveStatus !== "cancelled"
+    && effectiveStatus !== "checked_out"
+    && Number.isFinite(start)
+    && now.getTime() >= start;
+}
+
+function getReservationViewModel(reservation) {
+  const effectiveStatus = getEffectiveReservationStatus(reservation);
+  const statusLabel = statusText[effectiveStatus] || effectiveStatus;
+  const projectName = reservation.project_name || "未填專案";
+  const requesterName = reservation.requester_name || "-";
+  const equipmentName = reservation.equipment_name || "-";
+  const equipmentCategory = reservation.equipment_category || "-";
+  const startText = formatDateTime(reservation.start_time);
+  const endText = formatDateTime(reservation.end_time);
+  const timeRange = `${startText} - ${endText}`;
+  const detailRows = [
+    ["設備", equipmentName],
+    ["設備類別", equipmentCategory],
+    ["專案名稱", reservation.project_name],
+    ["申請人", reservation.requester_name],
+    ["Email", reservation.requester_email],
+    ["部門", reservation.department],
+    ["使用目的", reservation.purpose],
+    ["測試條件", reservation.test_condition],
+    ["開始時間", startText],
+    ["結束時間", endText],
+    ["狀態", statusLabel],
+    ["備註", reservation.notes],
+    ["取消原因", reservation.cancel_reason],
+    ["預約編號", reservation.id],
+  ];
+
+  return {
+    id: reservation.id,
+    projectName,
+    requesterName,
+    equipmentName,
+    equipmentCategory,
+    department: reservation.department || "-",
+    purpose: reservation.purpose || "-",
+    effectiveStatus,
+    statusLabel,
+    startText,
+    endText,
+    timeRange,
+    titleText: `${equipmentName} / ${projectName} / ${timeRange}`,
+    subtitleText: `${equipmentName} / ${timeRange}`,
+    detailRows,
+  };
+}
+
 function openEquipmentSchedule(equipment) {
   const dialog = document.getElementById("equipmentScheduleDialog");
   if (!dialog) return;
@@ -664,6 +877,7 @@ function openEquipmentSchedule(equipment) {
 }
 
 function renderEquipmentScheduleDialog(equipment) {
+  const equipmentView = getEquipmentViewModel(equipment);
   const title = document.getElementById("equipmentScheduleTitle");
   const subtitle = document.getElementById("equipmentScheduleSubtitle");
   const scale = document.getElementById("equipmentScheduleScale");
@@ -676,8 +890,8 @@ function renderEquipmentScheduleDialog(equipment) {
     reservation.status !== "cancelled"
   );
   const stackedReservations = layoutStackedReservations(reservations);
-  title.textContent = equipment.name || "設備預約放大檢視";
-  subtitle.textContent = `${equipment.category || "-"} / ${formatDate(state.weekStart)} - ${formatDate(addDays(state.weekStart, 6))}`;
+  title.textContent = equipmentView.name || "設備預約放大檢視";
+  subtitle.textContent = `${equipmentView.category} / ${formatDate(state.weekStart)} - ${formatDate(addDays(state.weekStart, 6))}`;
   scale.innerHTML = "";
   chart.innerHTML = "";
 
@@ -695,15 +909,20 @@ function renderEquipmentScheduleDialog(equipment) {
 
   stackedReservations.forEach((stacked) => {
     const reservation = stacked.reservation;
+    const view = getReservationViewModel(reservation);
     const bar = document.createElement("button");
     bar.type = "button";
-    bar.className = "gantt-bar equipment-schedule-bar";
+    bar.className = [
+      "gantt-bar",
+      "equipment-schedule-bar",
+      view.effectiveStatus === "checked_out" ? "is-complete" : "",
+    ].filter(Boolean).join(" ");
     bar.style.cssText = getStackedGanttBarStyle(stacked, { zoom: true });
-    bar.title = `${reservation.equipment_name} / ${reservation.project_name} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
+    bar.title = view.titleText;
     bar.innerHTML = `
-      <strong>${escapeHtml(reservation.project_name || "未填專案")}</strong>
-      <span>${escapeHtml(reservation.requester_name || "-")}</span>
-      <em>${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}</em>
+      <strong>${escapeHtml(view.projectName)}</strong>
+      <span>${escapeHtml(view.requesterName)}</span>
+      <em>${escapeHtml(view.timeRange)}</em>
     `;
     bar.addEventListener("click", () => openReservationDetail(reservation));
     lane.appendChild(bar);
@@ -718,12 +937,15 @@ function renderEquipmentScheduleDialog(equipment) {
 
   chart.appendChild(lane);
   list.innerHTML = reservations.length
-    ? reservations.map((reservation) => `
+    ? reservations.map((reservation) => {
+      const view = getReservationViewModel(reservation);
+      return `
       <button type="button" class="equipment-schedule-list-item" data-reservation-id="${escapeHtml(reservation.id)}">
-        <strong>${escapeHtml(reservation.project_name || "未填專案")}</strong>
-        <span>${escapeHtml(reservation.requester_name || "-")} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}</span>
+        <strong>${escapeHtml(view.projectName)}</strong>
+        <span>${escapeHtml(view.requesterName)} / ${escapeHtml(view.timeRange)}</span>
       </button>
-    `).join("")
+    `;
+    }).join("")
     : '<div class="empty-card">本週沒有預約</div>';
   list.querySelectorAll("[data-reservation-id]").forEach((button) => {
     const reservation = reservations.find((item) => String(item.id) === String(button.dataset.reservationId));
@@ -734,17 +956,19 @@ function renderEquipmentScheduleDialog(equipment) {
 }
 
 function openReservationDetail(reservation) {
+  const view = getReservationViewModel(reservation);
   const dialog = document.getElementById("reservationDetailDialog");
   const title = document.getElementById("reservationDetailTitle");
   const subtitle = document.getElementById("reservationDetailSubtitle");
   const body = document.getElementById("reservationDetailBody");
   const copyButton = document.getElementById("reservationDetailCopyBtn");
+  const completeButton = document.getElementById("reservationDetailCompleteBtn");
   const status = document.getElementById("reservationDetailCopyStatus");
-  if (!dialog || !title || !subtitle || !body || !copyButton || !status) return;
+  if (!dialog || !title || !subtitle || !body || !copyButton || !completeButton || !status) return;
 
-  title.textContent = reservation.project_name || "預約明細";
-  subtitle.textContent = `${reservation.equipment_name || "-"} / ${formatDateTime(reservation.start_time)} - ${formatDateTime(reservation.end_time)}`;
-  body.innerHTML = getReservationDetailRows(reservation).map(([label, value]) => `
+  title.textContent = view.projectName || "預約明細";
+  subtitle.textContent = view.subtitleText;
+  body.innerHTML = view.detailRows.map(([label, value]) => `
     <div class="detail-item">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value || "-")}</strong>
@@ -759,11 +983,14 @@ function openReservationDetail(reservation) {
       status.textContent = "複製失敗，請手動選取";
     }
   };
+  completeButton.hidden = !canCompleteReservation(reservation);
+  completeButton.onclick = () => completeReservation(reservation);
   configureReservationEdit(reservation);
   dialog.showModal();
 }
 
 function configureReservationEdit(reservation) {
+  const panel = document.querySelector(".reservation-edit-panel");
   const emailInput = document.getElementById("reservationEditEmail");
   const unlockButton = document.getElementById("reservationEditUnlockBtn");
   const projectInput = document.getElementById("reservationEditProject");
@@ -773,12 +1000,21 @@ function configureReservationEdit(reservation) {
   const message = document.getElementById("reservationEditMessage");
   if (!emailInput || !unlockButton || !projectInput || !startInput || !endInput || !saveButton || !message) return;
 
+  const isReadOnly = getEffectiveReservationStatus(reservation) === "checked_out";
+  if (panel) {
+    panel.hidden = isReadOnly;
+  }
   emailInput.value = "";
   projectInput.value = reservation.project_name || "";
   startInput.value = toDateTimeInput(new Date(reservation.start_time));
   endInput.value = toDateTimeInput(new Date(reservation.end_time));
   message.textContent = "";
   setReservationEditUnlocked(false);
+  if (isReadOnly) {
+    unlockButton.onclick = null;
+    saveButton.onclick = null;
+    return;
+  }
   unlockButton.onclick = () => unlockReservationEdit(reservation);
   saveButton.onclick = () => saveReservationEdit(reservation);
 }
@@ -838,6 +1074,11 @@ async function saveReservationEdit(reservation) {
   const dialog = document.getElementById("reservationDetailDialog");
   if (!projectInput || !startInput || !endInput || !message) return;
 
+  if (getEffectiveReservationStatus(reservation) === "checked_out") {
+    message.textContent = "已完成的預約只能瀏覽，不能再修改。";
+    return;
+  }
+
   const projectName = String(projectInput.value || "").trim();
   if (!projectName) {
     message.textContent = "請輸入專案名稱。";
@@ -884,22 +1125,7 @@ async function saveReservationEdit(reservation) {
 }
 
 function getReservationDetailRows(reservation) {
-  return [
-    ["設備", reservation.equipment_name],
-    ["設備類別", reservation.equipment_category],
-    ["專案名稱", reservation.project_name],
-    ["申請人", reservation.requester_name],
-    ["Email", reservation.requester_email],
-    ["部門", reservation.department],
-    ["使用目的", reservation.purpose],
-    ["測試條件", reservation.test_condition],
-    ["開始時間", formatDateTime(reservation.start_time)],
-    ["結束時間", formatDateTime(reservation.end_time)],
-    ["狀態", statusText[reservation.status] || reservation.status],
-    ["備註", reservation.notes],
-    ["取消原因", reservation.cancel_reason],
-    ["預約編號", reservation.id],
-  ];
+  return getReservationViewModel(reservation).detailRows;
 }
 
 function getReservationDetailText(reservation) {
@@ -920,18 +1146,28 @@ function renderReservationRows() {
   }
 
   state.reservations.forEach((reservation) => {
+    const view = getReservationViewModel(reservation);
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${escapeHtml(reservation.equipment_name)}</td>
-      <td>${formatDateTime(reservation.start_time)}<br>${formatDateTime(reservation.end_time)}</td>
-      <td>${escapeHtml(reservation.requester_name)}<br><span class="muted">${escapeHtml(reservation.department)}</span></td>
-      <td>${escapeHtml(reservation.project_name)}<br><span class="muted">${escapeHtml(reservation.purpose)}</span></td>
-      <td><span class="badge ${escapeHtml(reservation.status)}">${escapeHtml(statusText[reservation.status] || reservation.status)}</span></td>
+      <td>${escapeHtml(view.equipmentName)}</td>
+      <td>${escapeHtml(view.startText)}<br>${escapeHtml(view.endText)}</td>
+      <td>${escapeHtml(view.requesterName)}<br><span class="muted">${escapeHtml(view.department)}</span></td>
+      <td>${escapeHtml(view.projectName)}<br><span class="muted">${escapeHtml(view.purpose)}</span></td>
+      <td><span class="badge ${escapeHtml(view.effectiveStatus)}">${escapeHtml(view.statusLabel)}</span></td>
       <td class="row-actions"></td>
     `;
 
     const actions = tr.querySelector(".row-actions");
-    if (reservation.status !== "cancelled") {
+    if (canCompleteReservation(reservation)) {
+      const complete = document.createElement("button");
+      complete.className = "secondary small-action";
+      complete.type = "button";
+      complete.textContent = "完成";
+      complete.addEventListener("click", () => completeReservation(reservation));
+      actions.appendChild(complete);
+    }
+
+    if (reservation.status !== "cancelled" && getEffectiveReservationStatus(reservation) !== "checked_out") {
       const cancel = document.createElement("button");
       cancel.className = "danger-link";
       cancel.type = "button";
@@ -982,6 +1218,7 @@ async function submitReservation(event) {
       .select("id, requester_name, start_time, end_time")
       .eq("equipment_id", equipmentId)
       .neq("status", "cancelled")
+      .neq("status", "checked_out")
       .lt("start_time", endIso)
       .gt("end_time", startIso);
 
@@ -1321,6 +1558,61 @@ async function cancelReservation(reservation) {
       });
     assertNoError(historyError, "寫入預約歷程失敗");
 
+    await loadReservations();
+    renderAll();
+  } catch (error) {
+    renderNotice(error.message, "error");
+  }
+}
+
+async function completeReservation(reservation) {
+  assertClientReady();
+
+  if (!canCompleteReservation(reservation)) {
+    renderNotice("此預約目前不能標記完成。", "error");
+    return;
+  }
+
+  const confirmed = window.confirm("確定要將此預約標記為完成，並從現在開始釋放後續時段嗎？");
+  if (!confirmed) return;
+
+  try {
+    const nowIso = new Date().toISOString();
+    const { data: current, error: loadError } = await state.client
+      .from("reservations")
+      .select("*")
+      .eq("id", reservation.id)
+      .single();
+    assertNoError(loadError, "讀取預約失敗");
+
+    const originalEnd = new Date(current.end_time).getTime();
+    const now = new Date(nowIso).getTime();
+    const patch = {
+      status: "checked_out",
+      checked_out_at: nowIso,
+      end_time: now < originalEnd ? nowIso : current.end_time,
+    };
+
+    const { data: updated, error: updateError } = await state.client
+      .from("reservations")
+      .update(patch)
+      .eq("id", reservation.id)
+      .select()
+      .single();
+    assertNoError(updateError, "完成預約失敗");
+
+    const { error: historyError } = await state.client
+      .from("reservation_history")
+      .insert({
+        reservation_id: reservation.id,
+        action: "completed",
+        old_value: current,
+        new_value: updated,
+        changed_by_name: reservation.requester_name,
+      });
+    assertNoError(historyError, "寫入預約歷史失敗");
+
+    document.getElementById("reservationDetailDialog")?.close();
     await loadReservations();
     renderAll();
   } catch (error) {

@@ -446,6 +446,7 @@ button.ghost {
 }
 
 .badge.cancelled,
+.badge.checked_out,
 .badge.inactive {
   background: #f1f5f9;
   color: #64748b;
@@ -672,6 +673,7 @@ textarea:focus {
 .gantt-row {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
+  /* 主畫面設備列的基準高度；若 JS 有動態指定 height，會覆蓋這個值 */
   min-height: 76px;
   border-bottom: 1px solid var(--line);
 }
@@ -742,7 +744,10 @@ textarea:focus {
 
 .gantt-lane {
   position: relative;
+  /* 右側甘特圖格子的基準高度；若 JS 有動態指定 height，會覆蓋這個值 */
   min-height: 76px;
+  /* 避免重疊色塊或陰影看起來超出設備列容器 */
+  overflow: hidden;
   background:
     repeating-linear-gradient(
       to right,
@@ -764,20 +769,30 @@ textarea:focus {
 .gantt-bar {
   position: absolute;
   top: 10px;
-  min-width: 56px;
+  /* 色塊最小寬度，避免太短的預約完全看不到 */
+  min-width: 18px;
   max-width: calc(100% - 4px);
+  /* 預設色塊高度；主畫面若由 JS 動態指定高度，會覆蓋這個值 */
   height: 56px;
+  /* 覆蓋全站 button min-height: 40px，避免 26px 等動態高度被強制撐高 */
+  min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* 讓文字在色塊內垂直置中 */
+  justify-content: center;
   border: 1px solid #1d4ed8;
   border-radius: 6px;
   background: #2563eb;
   color: #fff;
-  padding: 6px 8px;
+  /* 色塊內文字內距：上 4 / 左右 8 / 下 3 */
+  padding: 4px 8px 3px;
   text-align: left;
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
 }
 
 .gantt-bar.compact-bar {
+  /* 公佈欄 / 壓縮模式專用的小色塊設定 */
   min-width: 42px;
   min-height: 0;
   padding: 1px 5px;
@@ -789,12 +804,29 @@ textarea:focus {
   background: #1d4ed8;
 }
 
+.gantt-bar.is-complete {
+  border-color: #93c5fd;
+  background: #dbeafe;
+  color: #1e3a8a;
+  box-shadow: 0 4px 10px rgba(96, 165, 250, 0.16);
+}
+
+.gantt-bar.is-complete span,
+.gantt-bar.is-complete em {
+  color: #2563eb;
+}
+
+.gantt-bar.is-complete:hover {
+  background: #bfdbfe;
+}
+
 .gantt-bar:focus-visible {
   outline: 3px solid #93c5fd;
   outline-offset: 2px;
 }
 
 .bulletin-bar {
+  /* 公佈欄模式專用：放大色塊高度與內距 */
   top: 14px;
   height: 78px;
   padding: 10px 12px;
@@ -803,6 +835,7 @@ textarea:focus {
 .gantt-bar strong,
 .gantt-bar span,
 .gantt-bar em {
+  /* 三種文字都強制單行，避免高度被文字撐爆 */
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -810,29 +843,62 @@ textarea:focus {
 }
 
 .gantt-bar strong {
+  /* 第一行：專案名稱 */
   font-size: 12px;
   font-weight: 800;
+  line-height: 1.15;
+}
+
+.gantt-bar.project-requester {
+  /* 兩行模式：專案 + 姓名，稍微壓縮上下內距 */
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.gantt-bar.project-only {
+  /* 單行模式：只顯示專案名稱，文字垂直置中 */
+  align-items: center;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.gantt-bar.project-only strong {
+  /* 單行模式下，讓專案名稱撐滿整個寬度，省去奇怪縮排 */
+  width: 100%;
 }
 
 .compact-bar strong {
+  /* 壓縮模式下專案名稱字體更小 */
   font-size: 10px;
   line-height: 1.25;
 }
 
+.project-requester em,
+.project-only span,
+.project-only em {
+  /* 兩行模式隱藏時間；單行模式只留專案名稱 */
+  display: none;
+}
+
 .compact-bar span,
 .compact-bar em {
+  /* 壓縮模式只顯示第一行專案名稱 */
   display: none;
 }
 
 .gantt-bar span {
+  /* 第二行：申請人 */
   font-size: 11px;
   color: #dbeafe;
+  line-height: 1.15;
 }
 
 .gantt-bar em {
+  /* 第三行：時間區間 */
   font-size: 10px;
   color: #bfdbfe;
   font-style: normal;
+  line-height: 1.1;
 }
 
 .bulletin-bar strong {
