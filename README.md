@@ -1,71 +1,59 @@
-# 可靠度實驗室設備預約 MVP
+# Reliability Lab Reservation MVP
 
-部門內暫用版設備預約系統。此版本包含前端、後端 API、SQLite 資料庫與基本測試。
+This repository is now organized for a fully hosted deployment:
 
-## 目前功能
+- repo root (`index.html`, `app.js`, `styles.css`): primary hosted frontend
+- `docs/`: compatibility redirect for older GitHub Pages settings
+- `app/static/`: source copy of the frontend for local development
+- `supabase/manual/`: SQL scripts to run manually in Supabase SQL Editor
+- `app/server.py`: legacy local fallback and test harness
+- `tests/`: regression checks for UI and local API behavior
 
-- 設備清單與狀態
-- 新增設備
-- 修改設備狀態：可預約 / 維修中 / 停用
-- Dashboard 摘要：設備總數、本週預約、維修中、停用
-- 本週預約檢視
-- 設備使用甘特圖
-- 建立預約
-- 同設備同時段防重覆預約
-- 取消預約並保留取消原因
-- 預約歷史表預留稽核紀錄
+## Recommended GitHub Pages setup
 
-## 技術選型
+Use:
 
-- Frontend: HTML / CSS / JavaScript
-- Backend: Python standard library HTTP server
-- Database: SQLite
+- Branch: `main`
+- Folder: `/ (root)`
 
-此 MVP 不需安裝外部套件。
+Then the public site URL will load directly from the repository root.
 
-## 啟動
+## Deploy flow
 
-```powershell
-cd SNR.github.io
-python -m app.server --host 127.0.0.1 --port 8000
-```
+1. Push the repository to GitHub.
+2. In GitHub repository settings, open `Pages`.
+3. Set source to `Deploy from a branch`.
+4. Choose `main` and `/ (root)`.
+5. Save and wait for publish.
 
-打開：
+## Supabase setup
 
-```text
-http://127.0.0.1:8000
-```
+Run these scripts in Supabase SQL Editor before using the hosted site:
 
-資料庫會自動建立在：
+1. browser grants and RLS policies:
+   - [supabase/manual/20260702_hosted_web_policies.sql](C:/Users/105221/Documents/Codex/2026-07-01/new-chat/work/SNR.github.io/supabase/manual/20260702_hosted_web_policies.sql)
+2. optional sample equipment seed:
+   - [supabase/manual/20260702_sample_equipment_seed.sql](C:/Users/105221/Documents/Codex/2026-07-01/new-chat/work/SNR.github.io/supabase/manual/20260702_sample_equipment_seed.sql)
 
-```text
-app/../data/rlab_reservation.db
-```
+## Entry points
 
-## 測試
+- Hosted site entry: [index.html](C:/Users/105221/Documents/Codex/2026-07-01/new-chat/work/SNR.github.io/index.html)
+- Compatibility redirect: [docs/index.html](C:/Users/105221/Documents/Codex/2026-07-01/new-chat/work/SNR.github.io/docs/index.html)
+- Source frontend entry: [app/static/index.html](C:/Users/105221/Documents/Codex/2026-07-01/new-chat/work/SNR.github.io/app/static/index.html)
+
+## Browser configuration
+
+On first load, enter:
+
+- Supabase project URL
+- Supabase anon key
+
+The hosted frontend stores them in browser `localStorage` for reconnect on refresh.
+
+## Local verification
 
 ```powershell
 python -m unittest discover -s tests
+python -m py_compile app/server.py tests/test_api.py tests/test_static_ui.py
+node --check app/static/app.js
 ```
-
-## 資料儲存
-
-目前版本只使用本機 SQLite，不透過 Excel 儲存。
-
-```text
-data\rlab_reservation.db
-```
-
-前端畫面會透過後端 API 讀寫 SQLite，並即時顯示設備清單、本週預約、預約明細與甘特圖。
-
-如果後續要給整個部門多人長期使用，建議把 SQLite 遷移到 SQL Server、PostgreSQL 或 Azure SQL，並把 Web App 架在內部主機或公司雲端環境。
-
-## 後續擴充
-
-- AD / SSO 登入
-- Email 通知
-- 審核流程
-- QR Code 報到
-- 維修停機
-- 報表匯出
-- SQL Server / PostgreSQL / Azure SQL 遷移
