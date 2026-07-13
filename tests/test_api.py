@@ -37,19 +37,85 @@ class ApiTestCase(unittest.TestCase):
         self.assertGreaterEqual(len(data["equipment"]), 3)
         self.assertEqual(data["equipment"][0]["capacity"], 1)
 
-    def test_equipment_status_can_be_updated(self):
+    def test_root_frontend_is_served_without_exposing_project_files(self):
+        with urlopen(f"{self.base}/", timeout=5) as response:
+            html = response.read().decode("utf-8")
+        self.assertIn("可靠度實驗室設備預約系統", html)
+
+        with self.assertRaises(HTTPError) as ctx:
+            self.request("GET", "/app/server.py")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_equipment_fields_can_be_updated(self):
         status, data = self.request(
             "PATCH",
             "/api/equipment/1",
-            {"status": "maintenance", "changed_by": "Lab Admin"},
+            {
+                "name": "環境箱 A-1",
+                "category": "環測",
+                "location": "可靠度實驗室 3F",
+                "capacity": 3,
+                "equipment_spec": "落下高度：1 m",
+                "status": "validation",
+                "is_active": 0,
+            },
         )
 
         self.assertEqual(status, 200)
-        self.assertEqual(data["equipment"]["status"], "maintenance")
+        self.assertEqual(data["equipment"]["name"], "環境箱 A-1")
+        self.assertEqual(data["equipment"]["location"], "可靠度實驗室 3F")
+        self.assertEqual(data["equipment"]["capacity"], 3)
+        self.assertEqual(data["equipment"]["equipment_spec"], "落下高度：1 m")
+        self.assertEqual(data["equipment"]["status"], "validation")
+        self.assertEqual(data["equipment"]["is_active"], 0)
 
         status, equipment = self.request("GET", "/api/equipment")
         updated = next(item for item in equipment["equipment"] if item["id"] == 1)
-        self.assertEqual(updated["status"], "maintenance")
+        self.assertEqual(updated["name"], "環境箱 A-1")
+        self.assertEqual(updated["status"], "validation")
+
+    def test_capacity_allows_that_many_overlapping_reservations(self):
+        _, equipment_data = self.request(
+            "POST",
+            "/api/equipment",
+            {
+                "name": "Shared Drop Tester",
+                "category": "DROP",
+                "location": "可靠度實驗室 3F",
+                "capacity": 2,
+                "equipment_spec": "最大試片重量：5 kg",
+            },
+        )
+        equipment = equipment_data["equipment"]
+        self.assertEqual(equipment["equipment_spec"], "最大試片重量：5 kg")
+
+        reservation = {
+            "equipment_id": equipment["id"],
+            "requester_name": "Test User",
+            "requester_email": "test@example.com",
+            "department": "QA",
+            "project_name": "Shared fixture qualification",
+            "purpose": "Capacity test",
+            "start_time": "2026-07-04T09:00",
+            "end_time": "2026-07-04T10:00",
+        }
+        self.assertEqual(self.request("POST", "/api/reservations", reservation)[0], 201)
+        self.assertEqual(
+            self.request(
+                "POST",
+                "/api/reservations",
+                {**reservation, "requester_name": "Second User", "requester_email": "second@example.com"},
+            )[0],
+            201,
+        )
+
+        with self.assertRaises(HTTPError) as ctx:
+            self.request(
+                "POST",
+                "/api/reservations",
+                {**reservation, "requester_name": "Third User", "requester_email": "third@example.com"},
+            )
+        self.assertEqual(ctx.exception.code, 409)
 
         with self.assertRaises(HTTPError) as ctx:
             self.request("PATCH", "/api/equipment/1", {"status": "broken"})
@@ -61,6 +127,7 @@ class ApiTestCase(unittest.TestCase):
             "requester_name": "王小明",
             "requester_email": "ming@example.com",
             "department": "可靠度實驗室",
+            "project_name": "Apollo 耐久性驗證",
             "purpose": "可靠度驗證",
             "start_time": "2026-07-02T09:00",
             "end_time": "2026-07-02T11:00",
@@ -70,6 +137,7 @@ class ApiTestCase(unittest.TestCase):
         status, created = self.request("POST", "/api/reservations", payload)
         self.assertEqual(status, 201)
         self.assertEqual(created["reservation"]["status"], "reserved")
+        self.assertEqual(created["reservation"]["project_name"], "Apollo 耐久性驗證")
 
         with self.assertRaises(HTTPError) as ctx:
             self.request(
@@ -97,6 +165,62 @@ class ApiTestCase(unittest.TestCase):
         status, recreated = self.request("POST", "/api/reservations", payload)
         self.assertEqual(status, 201)
         self.assertEqual(recreated["reservation"]["status"], "reserved")
+
+    def test_invalid_numeric_inputs_return_400(self):
+        invalid_requests = [
+            ("PATCH", "/api/equipment/not-a-number", {"status": "available"}),
+            ("POST", "/api/equipment", {"name": "Tester", "category": "TEST", "capacity": "many"}),
+            ("GET", "/api/reservations?equipment_id=not-a-number", None),
+        ]
+
+        for method, path, payload in invalid_requests:
+            with self.subTest(method=method, path=path):
+                with self.assertRaises(HTTPError) as ctx:
+                    self.request(method, path, payload)
+                self.assertEqual(ctx.exception.code, 400)
+
+    def test_invalid_reservation_status_is_rejected(self):
+        payload = {
+            "equipment_id": 1,
+            "requester_name": "Test User",
+            "requester_email": "test@example.com",
+            "department": "QA",
+            "project_name": "Reservation status validation",
+            "purpose": "Status validation",
+            "start_time": "2026-07-03T09:00",
+            "end_time": "2026-07-03T10:00",
+        }
+        _, created = self.request("POST", "/api/reservations", payload)
+
+        with self.assertRaises(HTTPError) as ctx:
+            self.request(
+                "PATCH",
+                f"/api/reservations/{created['reservation']['id']}",
+                {"status": "unknown"},
+            )
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_project_name_is_required_for_reservations(self):
+        with self.assertRaises(HTTPError) as ctx:
+            self.request(
+                "POST",
+                "/api/reservations",
+                {
+                    "equipment_id": 1,
+                    "requester_name": "Test User",
+                    "requester_email": "test@example.com",
+                    "department": "QA",
+                    "purpose": "Reliability test",
+                    "start_time": "2026-07-05T09:00",
+                    "end_time": "2026-07-05T10:00",
+                },
+            )
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_json_body_must_be_an_object(self):
+        with self.assertRaises(HTTPError) as ctx:
+            self.request("POST", "/api/equipment", ["not", "an", "object"])
+        self.assertEqual(ctx.exception.code, 400)
 
 
 if __name__ == "__main__":

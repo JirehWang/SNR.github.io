@@ -1,0 +1,33 @@
+project: Reliability Lab Reservation
+root: D:\py\SNR.github.io
+
+entrypoints:
+  gui: index.html
+  cli: python -m app.server
+  main: app/server.py
+
+data_dirs:
+  input: data
+  intermediate: TODO: none
+  output: data
+  fixtures: tests
+
+verify_commands:
+  - python -m unittest discover -s tests
+  - python -m py_compile app/server.py tests/test_api.py tests/test_static_ui.py
+  - node --check app.js
+
+package_commands:
+  - not_applicable
+
+standard_scripts:
+  verify: scripts/verify.ps1
+  package: scripts/package.ps1
+
+project_record: docs/codex/project_journal.md
+
+risk_notes:
+  - The hosted root frontend and local SQLite server must reference the same frontend files.
+  - Supabase files are retained for future hosted deployment; local API authorization is intentionally out of scope.
+
+last_reviewed: 2026-07-13

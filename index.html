@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>可靠度實驗室設備預約系統</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-copy">
+      <p class="eyebrow">Reliability Lab Reservation</p>
+      <h1>可靠度實驗室設備預約系統</h1>
+      <p>全託管 MVP，使用 Supabase 管理設備、預約與歷程資料。</p>
+    </div>
+    <div class="header-actions">
+      <div id="connectionBadge" class="status-pill disconnected">未連線</div>
+      <button id="refreshBtn" class="secondary">重新整理</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section id="runtimeNotice" class="notice" aria-label="系統狀態">
+      正在初始化雲端連線，設備資料、預約資料與狀態修改都會直接寫入 Supabase。
+    </section>
+
+    <section class="panel dashboard-panel" aria-label="Dashboard">
+      <div class="section-title section-stack">
+        <div>
+          <h2>本週總覽</h2>
+          <p>快速檢視設備總數、預約量與設備狀態分布。</p>
+        </div>
+      </div>
+      <div id="dashboardMetrics" class="metrics-grid"></div>
+    </section>
+
+    <section class="panel workspace-shell" aria-label="主要工作區">
+      <div class="workspace-nav" role="tablist" aria-label="功能切換">
+        <button type="button" class="workspace-tab active" data-view-target="reservation" aria-selected="true">預約作業</button>
+        <button type="button" class="workspace-tab" data-view-target="equipment" aria-selected="false">設備管理</button>
+        <button type="button" class="workspace-tab" data-view-target="requester" aria-selected="false">使用者管理</button>
+        <button type="button" class="workspace-tab" data-view-target="bulletin" aria-selected="false">公佈欄</button>
+      </div>
+
+      <div class="workspace-view active" data-view="reservation">
+        <div class="split-layout reservation-layout">
+          <div class="main-column">
+            <section class="panel section-panel gantt-panel" aria-label="設備使用狀況">
+              <div class="section-title with-controls">
+                <div>
+                  <h2>設備使用狀況</h2>
+                  <p>用甘特圖檢視本週設備使用者、專案名稱與時段安排。</p>
+                </div>
+                <div class="week-controls">
+                  <button id="prevWeek" class="icon-btn" title="上一週" aria-label="上一週">&#8249;</button>
+                  <span id="weekLabel"></span>
+                  <button id="nextWeek" class="icon-btn" title="下一週" aria-label="下一週">&#8250;</button>
+                </div>
+              </div>
+              <div class="gantt-wrap">
+                <div id="ganttScale" class="gantt-scale"></div>
+                <div id="ganttChart" class="gantt-chart"></div>
+              </div>
+            </section>
+
+            <section class="panel section-panel list-panel" aria-label="預約清單">
+              <div class="section-title">
+                <div>
+                  <h2>預約清單</h2>
+                  <p>列出本週所有預約，並可直接取消。</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>設備</th>
+                      <th>時間</th>
+                      <th>申請人</th>
+                      <th>專案 / 用途</th>
+                      <th>狀態</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="reservationRows"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <aside class="side-column">
+            <section class="panel section-panel reservation-panel" aria-label="新增預約">
+              <div class="section-title">
+                <div>
+                  <h2>新增預約</h2>
+                  <p>建立設備使用申請，並帶入專案名稱供甘特圖識別。</p>
+                </div>
+              </div>
+              <form id="reservationForm" class="form-grid">
+                <label>
+                  設備
+                  <select name="equipment_id" required></select>
+                </label>
+                <label>
+                  申請人
+                  <div class="typeahead">
+                    <input name="requester_name" list="requesterNameOptions" required placeholder="請輸入姓名或選擇建議名單" autocomplete="off">
+                    <div id="requesterNameMatches" class="typeahead-menu" hidden></div>
+                  </div>
+                </label>
+                <label>
+                  Email
+                  <div class="typeahead">
+                    <input name="requester_email" list="requesterEmailOptions" type="email" required placeholder="name@example.com" autocomplete="off">
+                    <div id="requesterEmailMatches" class="typeahead-menu" hidden></div>
+                  </div>
+                </label>
+                <label>
+                  部門
+                  <input name="department" required value="PQE">
+                </label>
+                <label class="wide">
+                  專案名稱
+                  <input name="project_name" required placeholder="例如：SNR-MVP / 客戶案號 / EVT-01">
+                </label>
+                <label>
+                  開始時間
+                  <input name="start_time" type="datetime-local" required>
+                </label>
+                <label>
+                  結束時間
+                  <input name="end_time" type="datetime-local" required>
+                </label>
+                <label class="wide">
+                  使用目的
+                  <select name="purpose" required>
+                    <option value="可靠度驗證">可靠度驗證</option>
+                    <option value="驗證實驗">驗證實驗</option>
+                    <option value="樣品試產">樣品試產</option>
+                    <option value="教育訓練">教育訓練</option>
+                    <option value="其他">其他</option>
+                  </select>
+                </label>
+                <label class="wide" id="testConditionField" hidden>
+                  測試條件
+                  <textarea name="test_condition" rows="3"></textarea>
+                </label>
+                <label class="wide">
+                  備註
+                  <textarea name="notes" rows="3"></textarea>
+                </label>
+                <div class="form-actions wide">
+                  <button type="submit">送出預約</button>
+                  <span id="formMessage" role="status"></span>
+                </div>
+              </form>
+              <datalist id="requesterNameOptions"></datalist>
+              <datalist id="requesterEmailOptions"></datalist>
+            </section>
+          </aside>
+        </div>
+      </div>
+
+      <div class="workspace-view" data-view="equipment">
+        <div class="split-layout equipment-layout">
+          <section class="panel section-panel summary-panel" aria-label="設備清單">
+            <div class="section-title">
+              <div>
+                <h2>設備清單</h2>
+                <p>可編輯設備名稱、位置、容量、狀態與是否啟用。</p>
+              </div>
+            </div>
+            <div id="equipmentSummary" class="summary-grid"></div>
+          </section>
+
+          <aside class="panel section-panel admin-panel" aria-label="新增與編輯設備">
+            <div class="section-title">
+              <div>
+                <h2 id="equipmentFormTitle">新增/編輯設備資訊</h2>
+                <p>支援新增設備，也可修改既有設備資料。</p>
+              </div>
+            </div>
+            <form id="equipmentForm" class="form-grid compact">
+              <input type="hidden" name="equipment_id">
+              <label>
+                設備名稱
+                <input name="name" required placeholder="例如：Drop Tester">
+              </label>
+              <label>
+                類別
+                <input name="category" required placeholder="例如：DROP / ESD / TEMP">
+              </label>
+              <label>
+                位置
+                <input name="location" placeholder="例如：1F A 區">
+              </label>
+              <label>
+                可重疊預約量
+                <input name="capacity" type="text" placeholder="例如：2 / 2槽 / 4 channels">
+              </label>
+              <label>
+                設備規格
+                <textarea name="equipment_spec" rows="3" placeholder="例如：最大試片重量、尺寸、電壓或操作限制"></textarea>
+              </label>
+              <label>
+                預約需填測試條件
+                <select name="requires_test_condition">
+                  <option value="0">否</option>
+                  <option value="1">是</option>
+                </select>
+              </label>
+              <label>
+                狀態
+                <select name="status">
+                  <option value="available">可預約</option>
+                  <option value="validation">驗證中</option>
+                  <option value="maintenance">維修中</option>
+                  <option value="offline">停用</option>
+                </select>
+              </label>
+              <label>
+                是否啟用
+                <select name="is_active">
+                  <option value="1">啟用</option>
+                  <option value="0">停用</option>
+                </select>
+              </label>
+              <div class="form-actions wide">
+                <button type="submit" id="equipmentSubmitBtn" class="secondary">新增設備</button>
+                <button type="button" id="equipmentCancelBtn" class="ghost" hidden>取消編輯</button>
+                <button type="button" id="equipmentResetBtn" class="ghost">清空</button>
+                <span id="equipmentMessage" role="status"></span>
+              </div>
+            </form>
+          </aside>
+        </div>
+      </div>
+
+      <div class="workspace-view" data-view="requester">
+        <div class="split-layout equipment-layout">
+          <section class="panel section-panel summary-panel" aria-label="使用者清單">
+            <div class="section-title">
+              <div>
+                <h2>使用者清單</h2>
+                <p>管理預約時可快速帶入的申請人、Email 與預設部門。</p>
+              </div>
+            </div>
+            <div id="requesterSummary" class="summary-grid"></div>
+          </section>
+
+          <aside class="panel section-panel admin-panel" aria-label="新增使用者">
+            <div class="section-title">
+              <div>
+                <h2 id="requesterFormTitle">新增/編輯使用者</h2>
+                <p>新增後會直接寫入同一張 `requester_directory` 資料表。</p>
+              </div>
+            </div>
+            <form id="requesterForm" class="form-grid compact">
+              <input type="hidden" name="requester_id">
+              <label>
+                姓名
+                <input name="name" required placeholder="例如：Hank.Wu(吳金龍)">
+              </label>
+              <label>
+                Email
+                <input name="email" type="email" required placeholder="name@senao.com">
+              </label>
+              <label>
+                部門
+                <input name="department" value="PQE" required>
+              </label>
+              <label>
+                是否啟用
+                <select name="is_active">
+                  <option value="1">啟用</option>
+                  <option value="0">停用</option>
+                </select>
+              </label>
+              <div class="form-actions wide">
+                <button type="submit" id="requesterSubmitBtn" class="secondary">新增使用者</button>
+                <button type="button" id="requesterCancelBtn" class="ghost" hidden>取消編輯</button>
+                <button type="button" id="requesterResetBtn" class="ghost">清空</button>
+                <span id="requesterMessage" role="status"></span>
+              </div>
+            </form>
+          </aside>
+        </div>
+      </div>
+
+      <div class="workspace-view" data-view="bulletin">
+        <section id="bulletinBoard" class="panel section-panel bulletin-panel" aria-label="設備使用公佈欄">
+            <div class="section-title with-controls">
+              <div>
+                <h2>設備使用公佈欄</h2>
+                <p>適合投影在電視牆的本週設備使用時程。</p>
+              </div>
+            <div class="week-controls">
+              <button id="bulletinPrevWeek" class="icon-btn" title="上一週" aria-label="上一週">&#8249;</button>
+              <span id="bulletinWeekLabel"></span>
+              <button id="bulletinNextWeek" class="icon-btn" title="下一週" aria-label="下一週">&#8250;</button>
+              <button id="openBulletinWindowBtn" type="button" class="secondary">另開公佈欄</button>
+              <button id="bulletinFullscreenBtn" type="button">全螢幕</button>
+            </div>
+          </div>
+          <div class="bulletin-meta">
+            <span id="bulletinTimestamp">--</span>
+          </div>
+          <div class="bulletin-controls" aria-label="公佈欄捲動設定">
+            <label>
+              捲動間隔（秒）
+              <input id="bulletinScrollInterval" type="number" min="5" max="300" step="5" value="30">
+            </label>
+            <label>
+              捲動時間（秒）
+              <input id="bulletinScrollDuration" type="number" min="1" max="30" step="1" value="6">
+            </label>
+          </div>
+          <div class="gantt-wrap bulletin-wrap">
+            <div id="bulletinScale" class="gantt-scale bulletin-scale"></div>
+            <div id="bulletinChart" class="gantt-chart bulletin-chart"></div>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="reservationDetailDialog" class="reservation-detail-dialog">
+    <form method="dialog" class="reservation-detail-shell">
+      <div class="dialog-header">
+        <div>
+          <h2 id="reservationDetailTitle">預約明細</h2>
+          <p id="reservationDetailSubtitle"></p>
+        </div>
+        <button type="submit" class="ghost">關閉</button>
+      </div>
+      <div id="reservationDetailBody" class="detail-grid"></div>
+      <section class="reservation-edit-panel" aria-label="修改預約">
+        <div class="reservation-edit-lock">
+          <label>
+            輸入預約者 Email 解鎖修改
+            <input id="reservationEditEmail" type="email" autocomplete="off" placeholder="name@example.com">
+          </label>
+          <button type="button" id="reservationEditUnlockBtn" class="secondary">解鎖</button>
+        </div>
+        <div class="reservation-edit-grid">
+          <label>
+            專案名稱
+            <input id="reservationEditProject" disabled>
+          </label>
+          <label>
+            開始時間
+            <input id="reservationEditStart" type="datetime-local" disabled>
+          </label>
+          <label>
+            結束時間
+            <input id="reservationEditEnd" type="datetime-local" disabled>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="reservationEditSaveBtn" class="secondary" disabled>儲存修改</button>
+          <span id="reservationEditMessage" role="status"></span>
+        </div>
+      </section>
+      <div class="form-actions">
+        <button type="button" id="reservationDetailCopyBtn" class="secondary">複製明細</button>
+        <button type="button" id="reservationDetailCompleteBtn" class="secondary">完成</button>
+        <span id="reservationDetailCopyStatus" role="status"></span>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="equipmentScheduleDialog" class="equipment-schedule-dialog">
+    <form method="dialog" class="equipment-schedule-shell">
+      <div class="dialog-header">
+        <div>
+          <h2 id="equipmentScheduleTitle">設備預約放大檢視</h2>
+          <p id="equipmentScheduleSubtitle"></p>
+        </div>
+        <button type="submit" class="ghost">關閉</button>
+      </div>
+      <div class="equipment-schedule-wrap">
+        <div id="equipmentScheduleScale" class="equipment-schedule-scale"></div>
+        <div id="equipmentScheduleChart" class="equipment-schedule-chart"></div>
+      </div>
+      <div id="equipmentScheduleList" class="equipment-schedule-list"></div>
+    </form>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

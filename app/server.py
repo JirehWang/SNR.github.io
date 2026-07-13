@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import sqlite3
 import threading
 from datetime import datetime
@@ -10,8 +11,10 @@ from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
-STATIC_DIR = ROOT / "static"
+STATIC_DIR = ROOT.parent
 DEFAULT_DB = ROOT.parent / "data" / "rlab_reservation.db"
+LOGGER = logging.getLogger(__name__)
+STATIC_FILES = {"/index.html", "/app.js", "/styles.css"}
 
 
 class App:
@@ -37,6 +40,7 @@ class App:
                     location TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'available',
                     capacity INTEGER NOT NULL DEFAULT 1,
+                    equipment_spec TEXT NOT NULL DEFAULT '',
                     is_active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -47,6 +51,7 @@ class App:
                     requester_name TEXT NOT NULL,
                     requester_email TEXT NOT NULL,
                     department TEXT NOT NULL,
+                    project_name TEXT NOT NULL DEFAULT '',
                     purpose TEXT NOT NULL,
                     start_time TEXT NOT NULL,
                     end_time TEXT NOT NULL,
@@ -74,6 +79,20 @@ class App:
 
                 """
             )
+            equipment_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(equipment)").fetchall()
+            }
+            if "equipment_spec" not in equipment_columns:
+                conn.execute(
+                    "ALTER TABLE equipment ADD COLUMN equipment_spec TEXT NOT NULL DEFAULT ''"
+                )
+            reservation_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(reservations)").fetchall()
+            }
+            if "project_name" not in reservation_columns:
+                conn.execute(
+                    "ALTER TABLE reservations ADD COLUMN project_name TEXT NOT NULL DEFAULT ''"
+                )
             count = conn.execute("SELECT COUNT(*) AS count FROM equipment").fetchone()["count"]
             if count == 0:
                 conn.executemany(
@@ -119,6 +138,29 @@ class ApiError(Exception):
         self.message = message
 
 
+def normalize_status(value: str):
+    status = str(value or "").strip()
+    allowed_statuses = {"available", "validation", "maintenance", "offline"}
+    if status not in allowed_statuses:
+        raise ApiError(400, "status must be available, validation, maintenance, or offline")
+    return status
+
+
+def parse_int(value: Any, field: str):
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, f"{field} must be an integer") from exc
+
+
+def normalize_reservation_status(value: str):
+    status = str(value or "").strip()
+    allowed_statuses = {"reserved", "cancelled", "checked_in", "checked_out"}
+    if status not in allowed_statuses:
+        raise ApiError(400, "status must be reserved, cancelled, checked_in, or checked_out")
+    return status
+
+
 class Handler(SimpleHTTPRequestHandler):
     app: App
 
@@ -145,11 +187,14 @@ class Handler(SimpleHTTPRequestHandler):
             else:
                 if parsed.path == "/":
                     self.path = "/index.html"
+                elif parsed.path not in STATIC_FILES:
+                    raise ApiError(404, "Static file not found")
                 super().do_GET()
         except ApiError as exc:
             self.send_json({"error": exc.message}, exc.status)
-        except Exception as exc:
-            self.send_json({"error": f"Unexpected server error: {exc}"}, 500)
+        except Exception:
+            LOGGER.exception("Unexpected server error while handling %s %s", self.command, self.path)
+            self.send_json({"error": "Unexpected server error"}, 500)
 
     def handle_api(self, path: str, query: dict[str, list[str]]):
         if self.command == "GET" and path == "/api/equipment":
@@ -157,14 +202,14 @@ class Handler(SimpleHTTPRequestHandler):
         if self.command == "POST" and path == "/api/equipment":
             return self.create_equipment()
         if self.command == "PATCH" and path.startswith("/api/equipment/"):
-            equipment_id = int(path.rsplit("/", 1)[1])
+            equipment_id = parse_int(path.rsplit("/", 1)[1], "equipment_id")
             return self.update_equipment(equipment_id)
         if self.command == "GET" and path == "/api/reservations":
             return self.get_reservations(query)
         if self.command == "POST" and path == "/api/reservations":
             return self.create_reservation()
         if self.command == "PATCH" and path.startswith("/api/reservations/"):
-            reservation_id = int(path.rsplit("/", 1)[1])
+            reservation_id = parse_int(path.rsplit("/", 1)[1], "reservation_id")
             return self.update_reservation(reservation_id)
         raise ApiError(404, "API route not found")
 
@@ -173,9 +218,12 @@ class Handler(SimpleHTTPRequestHandler):
         if length == 0:
             return {}
         try:
-            return json.loads(self.rfile.read(length).decode("utf-8"))
-        except json.JSONDecodeError as exc:
+            data = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ApiError(400, "Invalid JSON body") from exc
+        if not isinstance(data, dict):
+            raise ApiError(400, "JSON body must be an object")
+        return data
 
     def send_json(self, payload: dict[str, Any], status: int = 200):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -189,7 +237,7 @@ class Handler(SimpleHTTPRequestHandler):
         with self.app.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, name, category, location, status, capacity, is_active
+                SELECT id, name, category, location, status, capacity, equipment_spec, is_active
                 FROM equipment
                 ORDER BY is_active DESC, category, name
                 """
@@ -202,21 +250,27 @@ class Handler(SimpleHTTPRequestHandler):
         missing = [field for field in required if not str(data.get(field, "")).strip()]
         if missing:
             raise ApiError(400, f"Missing required fields: {', '.join(missing)}")
-        capacity = int(data.get("capacity") or 1)
+        capacity = parse_int(data.get("capacity") or 1, "capacity")
         if capacity < 1:
             raise ApiError(400, "capacity must be at least 1")
+        status = normalize_status(data.get("status", "available"))
+        equipment_spec = str(data.get("equipment_spec", "")).strip()
+        is_active = 1 if parse_int(data.get("is_active", 1), "is_active") else 0
         with self.app.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO equipment (name, category, location, status, capacity)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO equipment
+                    (name, category, location, status, capacity, equipment_spec, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data["name"].strip(),
                     data["category"].strip(),
                     str(data.get("location", "")).strip(),
-                    str(data.get("status", "available")).strip() or "available",
+                    status,
                     capacity,
+                    equipment_spec,
+                    is_active,
                 ),
             )
             row = conn.execute("SELECT * FROM equipment WHERE id = ?", (cursor.lastrowid,)).fetchone()
@@ -224,19 +278,35 @@ class Handler(SimpleHTTPRequestHandler):
 
     def update_equipment(self, equipment_id: int):
         data = self.read_json()
-        allowed_statuses = {"available", "maintenance", "offline"}
-        status = str(data.get("status", "")).strip()
-        if status not in allowed_statuses:
-            raise ApiError(400, "status must be available, maintenance, or offline")
-
         with self.app.connect() as conn:
             current = conn.execute("SELECT * FROM equipment WHERE id = ?", (equipment_id,)).fetchone()
             if current is None:
                 raise ApiError(404, "Equipment not found")
-            conn.execute("UPDATE equipment SET status = ? WHERE id = ?", (status, equipment_id))
+            name = str(data.get("name", current["name"])).strip()
+            category = str(data.get("category", current["category"])).strip()
+            location = str(data.get("location", current["location"])).strip()
+            status = normalize_status(data.get("status", current["status"]))
+            capacity = parse_int(data.get("capacity", current["capacity"]) or 1, "capacity")
+            equipment_spec = str(data.get("equipment_spec", current["equipment_spec"])).strip()
+            is_active = 1 if parse_int(data.get("is_active", current["is_active"]), "is_active") else 0
+            if not name:
+                raise ApiError(400, "name is required")
+            if not category:
+                raise ApiError(400, "category is required")
+            if capacity < 1:
+                raise ApiError(400, "capacity must be at least 1")
+            conn.execute(
+                """
+                UPDATE equipment
+                SET name = ?, category = ?, location = ?, status = ?, capacity = ?,
+                    equipment_spec = ?, is_active = ?
+                WHERE id = ?
+                """,
+                (name, category, location, status, capacity, equipment_spec, is_active, equipment_id),
+            )
             row = conn.execute(
                 """
-                SELECT id, name, category, location, status, capacity, is_active
+                SELECT id, name, category, location, status, capacity, equipment_spec, is_active
                 FROM equipment
                 WHERE id = ?
                 """,
@@ -255,7 +325,7 @@ class Handler(SimpleHTTPRequestHandler):
             params.append(query["to"][0])
         if query.get("equipment_id"):
             where.append("equipment_id = ?")
-            params.append(int(query["equipment_id"][0]))
+            params.append(parse_int(query["equipment_id"][0], "equipment_id"))
         with self.app.connect() as conn:
             rows = conn.execute(
                 f"""
@@ -276,6 +346,7 @@ class Handler(SimpleHTTPRequestHandler):
             "requester_name",
             "requester_email",
             "department",
+            "project_name",
             "purpose",
             "start_time",
             "end_time",
@@ -284,13 +355,14 @@ class Handler(SimpleHTTPRequestHandler):
         if missing:
             raise ApiError(400, f"Missing required fields: {', '.join(missing)}")
 
-        equipment_id = int(data["equipment_id"])
+        equipment_id = parse_int(data["equipment_id"], "equipment_id")
         start = parse_dt(data["start_time"], "start_time")
         end = parse_dt(data["end_time"], "end_time")
         if end <= start:
             raise ApiError(400, "end_time must be later than start_time")
 
         with self.app.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             equipment = conn.execute(
                 "SELECT * FROM equipment WHERE id = ? AND is_active = 1", (equipment_id,)
             ).fetchone()
@@ -298,23 +370,26 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ApiError(404, "Equipment not found")
             if equipment["status"] not in ("available", "reserved"):
                 raise ApiError(409, "Equipment is not available for booking")
-            conflict = find_conflict(conn, equipment_id, data["start_time"], data["end_time"])
-            if conflict:
-                raise ApiError(409, f"Reservation conflicts with #{conflict['id']} ({conflict['requester_name']})")
+            overlap_count = count_overlapping_reservations(
+                conn, equipment_id, data["start_time"], data["end_time"]
+            )
+            if overlap_count >= equipment["capacity"]:
+                raise ApiError(409, "Reservation limit reached for this time")
 
             cursor = conn.execute(
                 """
                 INSERT INTO reservations (
-                    equipment_id, requester_name, requester_email, department, purpose,
+                    equipment_id, requester_name, requester_email, department, project_name, purpose,
                     start_time, end_time, status, approval_status, notes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'reserved', 'not_required', ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reserved', 'not_required', ?)
                 """,
                 (
                     equipment_id,
                     data["requester_name"].strip(),
                     data["requester_email"].strip(),
                     data["department"].strip(),
+                    data["project_name"].strip(),
                     data["purpose"].strip(),
                     data["start_time"],
                     data["end_time"],
@@ -335,11 +410,12 @@ class Handler(SimpleHTTPRequestHandler):
     def update_reservation(self, reservation_id: int):
         data = self.read_json()
         with self.app.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             current = get_reservation(conn, reservation_id)
             if current is None:
                 raise ApiError(404, "Reservation not found")
 
-            new_status = data.get("status", current["status"])
+            new_status = normalize_reservation_status(data.get("status", current["status"]))
             new_start = data.get("start_time", current["start_time"])
             new_end = data.get("end_time", current["end_time"])
             parse_dt(new_start, "start_time")
@@ -347,9 +423,11 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ApiError(400, "end_time must be later than start_time")
 
             if new_status != "cancelled":
-                conflict = find_conflict(conn, current["equipment_id"], new_start, new_end, reservation_id)
-                if conflict:
-                    raise ApiError(409, f"Reservation conflicts with #{conflict['id']} ({conflict['requester_name']})")
+                overlap_count = count_overlapping_reservations(
+                    conn, current["equipment_id"], new_start, new_end, reservation_id
+                )
+                if overlap_count >= current["equipment_capacity"]:
+                    raise ApiError(409, "Reservation limit reached for this time")
 
             old_value = json.dumps(row_to_dict(current), ensure_ascii=False)
             conn.execute(
@@ -388,7 +466,8 @@ class Handler(SimpleHTTPRequestHandler):
 def get_reservation(conn: sqlite3.Connection, reservation_id: int):
     return conn.execute(
         """
-        SELECT r.*, e.name AS equipment_name, e.category AS equipment_category
+        SELECT r.*, e.name AS equipment_name, e.category AS equipment_category,
+               e.capacity AS equipment_capacity
         FROM reservations r
         JOIN equipment e ON e.id = r.equipment_id
         WHERE r.id = ?
@@ -397,7 +476,7 @@ def get_reservation(conn: sqlite3.Connection, reservation_id: int):
     ).fetchone()
 
 
-def find_conflict(
+def count_overlapping_reservations(
     conn: sqlite3.Connection,
     equipment_id: int,
     start_time: str,
@@ -411,18 +490,16 @@ def find_conflict(
         params.append(exclude_reservation_id)
     return conn.execute(
         f"""
-        SELECT id, requester_name, start_time, end_time
+        SELECT COUNT(*) AS count
         FROM reservations
         WHERE equipment_id = ?
           AND status NOT IN ('cancelled')
           AND start_time < ?
           AND end_time > ?
           {exclude}
-        ORDER BY start_time
-        LIMIT 1
         """,
         params,
-    ).fetchone()
+    ).fetchone()["count"]
 
 
 class TestServer:
