@@ -5,7 +5,7 @@
 - Project: Reliability Lab Reservation
 - Root: `D:\py\SNR.github.io`
 - Contract: `project_contract.yml`
-- Current focus: Use the GitHub Pages Supabase frontend at the repository root while retaining the local SQLite server as a fallback.
+- Current focus: Keep the GitHub Pages Supabase frontend maintainable and document the handoff for the next owner.
 - Last updated: 2026-07-13
 
 ## Stable Facts
@@ -14,6 +14,7 @@
 - Local fallback starts with `python -m app.server`.
 - SQLite data is stored beneath `data/`.
 - Run `scripts/verify.ps1` for the project checks.
+- Read `docs/HANDOFF.md` before changing Supabase schema or deployment settings.
 
 ## Open Risks
 
@@ -28,3 +29,11 @@
 - Learned: The hosted frontend is Supabase-backed and supplies the full bulletin experience at `?view=bulletin`.
 - Verification: 19 tests passed; Python compile and JavaScript syntax checks passed.
 - Next: Keep root frontend files synchronized before deploying to GitHub Pages.
+
+### 2026-07-13 (handoff)
+
+- Focus: Maintenance handoff.
+- Changed: Rewrote README and added `docs/HANDOFF.md` with deployment, SQL ordering, frontend behavior, fallback limits, and troubleshooting.
+- Learned: `equipment_spec` requires the manual Supabase SQL before it can be persisted by the hosted frontend.
+- Verification: Pending final documentation commit; prior 19 frontend/API checks passed.
+- Next: New maintainer should run the handoff checklist and confirm Pages plus Supabase in a clean browser session.
