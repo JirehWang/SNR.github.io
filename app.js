@@ -16,6 +16,7 @@ const state = {
   equipmentFormDirty: false,
   equipmentSpecSupported: true,
   requesterFormDirty: false,
+  requesterEmailAutofillValue: "",
   requesterSuggestions: {
     requester_name: [],
     requester_email: [],
@@ -80,6 +81,8 @@ function bindEvents() {
   document.getElementById("requesterForm").addEventListener("input", markRequesterFormDirty);
   document.getElementById("requesterCancelBtn").addEventListener("click", cancelRequesterEdit);
   document.getElementById("requesterResetBtn").addEventListener("click", resetRequesterForm);
+  document.querySelector("#requesterForm input[name='name']").addEventListener("input", syncRequesterEmailSuggestion);
+  document.querySelector("#requesterForm input[name='email']").addEventListener("input", markRequesterEmailManual);
 
   document.querySelector("#reservationForm input[name='requester_name']").addEventListener("input", handleRequesterLookup);
   document.querySelector("#reservationForm input[name='requester_name']").addEventListener("change", syncRequesterFields);
@@ -277,6 +280,32 @@ function markEquipmentFormDirty() {
 
 function markRequesterFormDirty() {
   state.requesterFormDirty = true;
+}
+
+function suggestRequesterEmail(name) {
+  const normalizedName = String(name || "").trim();
+  const accountName = normalizedName.split(/[（(]/, 1)[0].trim();
+  return accountName ? `${accountName}@senao.com` : "";
+}
+
+function syncRequesterEmailSuggestion() {
+  const form = document.getElementById("requesterForm");
+  const nameInput = form.elements.name;
+  const emailInput = form.elements.email;
+  const suggestedEmail = suggestRequesterEmail(nameInput.value);
+  const currentEmail = String(emailInput.value || "").trim();
+
+  if (!currentEmail || currentEmail === state.requesterEmailAutofillValue) {
+    emailInput.value = suggestedEmail;
+    state.requesterEmailAutofillValue = suggestedEmail;
+  }
+}
+
+function markRequesterEmailManual(event) {
+  const currentEmail = String(event.currentTarget.value || "").trim();
+  if (currentEmail !== state.requesterEmailAutofillValue) {
+    state.requesterEmailAutofillValue = "";
+  }
 }
 
 function renderRequesterOptions() {
@@ -1504,6 +1533,7 @@ function syncRequesterForm() {
     form.elements.requester_id.value = "";
     form.elements.name.value = "";
     form.elements.email.value = "";
+    state.requesterEmailAutofillValue = "";
     form.elements.department.value = "PQE";
     form.elements.is_active.value = "1";
     if (!message.dataset.preserve) {
@@ -1520,6 +1550,8 @@ function syncRequesterForm() {
   form.elements.requester_id.value = String(requester.id);
   form.elements.name.value = requester.name;
   form.elements.email.value = requester.email;
+  const suggestedEmail = suggestRequesterEmail(requester.name);
+  state.requesterEmailAutofillValue = requester.email === suggestedEmail ? requester.email : "";
   form.elements.department.value = requester.department || "PQE";
   form.elements.is_active.value = requester.is_active ? "1" : "0";
   message.textContent = "";
