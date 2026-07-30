@@ -65,9 +65,14 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertNotIn("測試期間：", js)
         self.assertIn("project_name", js)
 
-        cancel_flow = js[js.index("async function cancelReservation"):js.index("async function completeReservation")]
+        self.assertIn("async function cancelProject", js)
+        self.assertIn("async function completeProject", js)
+        cancel_flow = js[js.index("async function cancelProject"):js.index("async function completeProject")]
         self.assertIn("window.prompt", cancel_flow)
         self.assertNotIn("window.confirm", cancel_flow)
+        complete_flow = js[js.index("async function completeProject"):]
+        self.assertIn("window.confirm", complete_flow)
+        self.assertIn("專案完成", complete_flow)
         self.assertIn(".gantt-chart", css)
         self.assertIn(".gantt-bar", css)
         self.assertIn(".bulletin-panel", css)
@@ -176,6 +181,10 @@ class StaticUiTestCase(unittest.TestCase):
 
         self.assertIn('id="reservationDetailDialog"', html)
         self.assertIn('id="reservationDetailCopyBtn"', html)
+        self.assertIn('id="reservationDetailCompleteBtn"', html)
+        self.assertIn('id="reservationDetailCancelBtn"', html)
+        self.assertIn(">專案完成<", html)
+        self.assertIn(">專案取消<", html)
         self.assertIn('id="reservationEditEmail"', html)
         self.assertIn('id="reservationEditUnlockBtn"', html)
         self.assertIn('id="reservationEditSaveBtn"', html)
@@ -233,12 +242,15 @@ class StaticUiTestCase(unittest.TestCase):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
         css = (STATIC / "styles.css").read_text(encoding="utf-8")
 
-        self.assertIn('id="reservationDetailCompleteBtn"', html)
-        self.assertIn("function completeReservation(", js)
+        self.assertIn("function completeProject(", js)
+        self.assertIn("function cancelProject(", js)
+        self.assertIn('edit.textContent = "編輯"', js)
+        self.assertNotIn('complete.textContent = "完成"', js)
+        self.assertNotIn('cancel.textContent = "取消"', js)
         self.assertIn("function getEffectiveReservationStatus(", js)
         self.assertIn("function canCompleteReservation(", js)
         self.assertIn('panel.hidden = isReadOnly', js)
-        self.assertIn('getEffectiveReservationStatus(reservation) === "checked_out"', js)
+        self.assertIn('["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation))', js)
         self.assertIn("statusLabel = statusText[effectiveStatus] || effectiveStatus", js)
         self.assertIn("return getReservationViewModel(reservation).detailRows", js)
         self.assertIn("checked_out:", js)

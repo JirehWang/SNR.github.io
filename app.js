@@ -1052,8 +1052,9 @@ function openReservationDetail(reservation) {
   const body = document.getElementById("reservationDetailBody");
   const copyButton = document.getElementById("reservationDetailCopyBtn");
   const completeButton = document.getElementById("reservationDetailCompleteBtn");
+  const cancelButton = document.getElementById("reservationDetailCancelBtn");
   const status = document.getElementById("reservationDetailCopyStatus");
-  if (!dialog || !title || !subtitle || !body || !copyButton || !completeButton || !status) return;
+  if (!dialog || !title || !subtitle || !body || !copyButton || !completeButton || !cancelButton || !status) return;
 
   title.textContent = view.projectName || "預約明細";
   subtitle.textContent = view.subtitleText;
@@ -1073,7 +1074,10 @@ function openReservationDetail(reservation) {
     }
   };
   completeButton.hidden = !canCompleteReservation(reservation);
-  completeButton.onclick = () => completeReservation(reservation);
+  completeButton.onclick = () => completeProject(reservation);
+  const isReadOnly = ["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation));
+  cancelButton.hidden = isReadOnly;
+  cancelButton.onclick = () => cancelProject(reservation);
   configureReservationEdit(reservation);
   dialog.showModal();
 }
@@ -1089,7 +1093,7 @@ function configureReservationEdit(reservation) {
   const message = document.getElementById("reservationEditMessage");
   if (!emailInput || !unlockButton || !projectInput || !startInput || !endInput || !saveButton || !message) return;
 
-  const isReadOnly = getEffectiveReservationStatus(reservation) === "checked_out";
+  const isReadOnly = ["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation));
   if (panel) {
     panel.hidden = isReadOnly;
   }
@@ -1163,8 +1167,8 @@ async function saveReservationEdit(reservation) {
   const dialog = document.getElementById("reservationDetailDialog");
   if (!projectInput || !startInput || !endInput || !message) return;
 
-  if (getEffectiveReservationStatus(reservation) === "checked_out") {
-    message.textContent = "已完成的預約只能瀏覽，不能再修改。";
+  if (["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation))) {
+    message.textContent = "已完成或已取消的預約只能瀏覽，不能再修改。";
     return;
   }
 
@@ -1247,23 +1251,12 @@ function renderReservationRows() {
     `;
 
     const actions = tr.querySelector(".row-actions");
-    if (canCompleteReservation(reservation)) {
-      const complete = document.createElement("button");
-      complete.className = "secondary small-action";
-      complete.type = "button";
-      complete.textContent = "完成";
-      complete.addEventListener("click", () => completeReservation(reservation));
-      actions.appendChild(complete);
-    }
-
-    if (reservation.status !== "cancelled" && getEffectiveReservationStatus(reservation) !== "checked_out") {
-      const cancel = document.createElement("button");
-      cancel.className = "danger-link";
-      cancel.type = "button";
-      cancel.textContent = "取消";
-      cancel.addEventListener("click", () => cancelReservation(reservation));
-      actions.appendChild(cancel);
-    }
+    const edit = document.createElement("button");
+    edit.className = "secondary small-action";
+    edit.type = "button";
+    edit.textContent = "編輯";
+    edit.addEventListener("click", () => openReservationDetail(reservation));
+    actions.appendChild(edit);
 
     rows.appendChild(tr);
   });
@@ -1626,10 +1619,11 @@ function equipmentMatchesPayload(equipment, payload) {
     && isTruthyFlag(equipment.requires_test_condition) === isTruthyFlag(payload.requires_test_condition);
 }
 
-async function cancelReservation(reservation) {
+async function cancelProject(reservation) {
   assertClientReady();
 
-  const reason = window.prompt("請輸入取消原因", "行程異動");
+  const reasonInput = window.prompt("請輸入專案取消原因", "行程異動");
+  const reason = String(reasonInput || "").trim();
   if (!reason) return;
 
   try {
@@ -1646,7 +1640,7 @@ async function cancelReservation(reservation) {
       .eq("id", reservation.id)
       .select()
       .single();
-    assertNoError(updateError, "取消預約失敗");
+    assertNoError(updateError, "取消專案失敗");
 
     const { error: historyError } = await state.client
       .from("reservation_history")
@@ -1661,20 +1655,21 @@ async function cancelReservation(reservation) {
 
     await loadReservations();
     renderAll();
+    document.getElementById("reservationDetailDialog")?.close();
   } catch (error) {
     renderNotice(error.message, "error");
   }
 }
 
-async function completeReservation(reservation) {
+async function completeProject(reservation) {
   assertClientReady();
 
   if (!canCompleteReservation(reservation)) {
-    renderNotice("此預約目前不能標記完成。", "error");
+    renderNotice("此專案目前不能標記為完成。", "error");
     return;
   }
 
-  const confirmed = window.confirm("確定要將此預約標記為完成，並從現在開始釋放後續時段嗎？");
+  const confirmed = window.confirm("確定要將此專案標記為「專案完成」嗎？完成後會釋放後續時段。");
   if (!confirmed) return;
 
   try {
@@ -1700,7 +1695,7 @@ async function completeReservation(reservation) {
       .eq("id", reservation.id)
       .select()
       .single();
-    assertNoError(updateError, "完成預約失敗");
+    assertNoError(updateError, "完成專案失敗");
 
     const { error: historyError } = await state.client
       .from("reservation_history")

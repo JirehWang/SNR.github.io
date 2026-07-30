@@ -24,6 +24,11 @@
 
 ### 2026-07-30
 
+- Focus: Route reservation status operations through the project detail interface.
+- Changed: Replaced reservation-list completion/cancellation actions with one 編輯 button; renamed the detail actions to 專案完成 and 專案取消, added completion confirmation, required a cancellation reason, and made completed/cancelled reservations read-only.
+- Verification: Static UI regression checks, 19 project tests, JavaScript syntax check, and diff check passed; browser visual verification is next.
+- Next: Push the hosted frontend fix and confirm the Pages asset update.
+
 - Focus: Calculate dashboard reservation hours within the displayed week.
 - Changed: Clipped each active reservation to `state.weekStart` through seven days later before summing hours; cancellation flow review found one reason prompt and no second confirmation dialog.
 - Verification: Regression checks for weekly clipping and the single cancellation reason prompt, 19 project tests, JavaScript syntax check, and diff check passed.
