@@ -641,6 +641,7 @@ textarea:focus {
   height: clamp(320px, calc(100vh - 250px), 70vh);
   min-height: 320px;
   overflow-y: auto;
+  scroll-padding-top: 41px;
   scroll-snap-type: y mandatory;
 }
 

@@ -24,6 +24,12 @@
 
 ### 2026-07-30
 
+- Focus: Correct the sticky-header offset in bulletin row snapping.
+- Changed: Added a measured sticky-header offset to the scroll snap padding and bottom target calculation so every landing row starts immediately below the date header.
+- Learned: The date header is 41 CSS pixels in the current layout; without `scroll-padding-top`, mandatory snapping moved the first row to `scrollTop=41` and hid its first 41 pixels.
+- Verification: Red-green static regression check, 19 project tests, JavaScript syntax check, and browser checks at 1920×1080 and 1366×768 passed; the top reached `scrollTop=0` and subsequent rows landed at a zero-pixel offset below the sticky header.
+- Next: Monitor the GitHub Pages rollout after pushing the hosted frontend fix.
+
 - Focus: Repair bulletin board auto-scroll on the hosted frontend.
 - Changed: Constrained `.bulletin-wrap` to a viewport-based height, limited auto-scroll to fullscreen playback, aligned page transitions to bulletin rows, stopped/reset scrolling on fullscreen exit, and added static regression assertions.
 - Learned: The prior `min-height` let the bulletin container grow to its full content height (`scrollHeight === clientHeight`), so the scheduler returned without starting its interval.

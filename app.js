@@ -1764,6 +1764,7 @@ function scheduleBulletinAutoScroll(options = {}) {
 
   const wrap = document.querySelector(".bulletin-wrap");
   if (!wrap) return;
+  syncBulletinStickyOffset(wrap);
   if (!document.fullscreenElement) return;
 
   const overflow = wrap.scrollHeight - wrap.clientHeight;
@@ -1799,11 +1800,24 @@ function stopBulletinAutoScroll(options = {}) {
   state.bulletinScroll.direction = "down";
 }
 
+function getBulletinStickyOffset(wrap) {
+  return wrap.querySelector(".bulletin-scale")?.getBoundingClientRect().height || 0;
+}
+
+function syncBulletinStickyOffset(wrap) {
+  const stickyOffset = getBulletinStickyOffset(wrap);
+  if (stickyOffset > 0) {
+    wrap.style.scrollPaddingTop = `${stickyOffset}px`;
+  }
+  return stickyOffset;
+}
+
 function getBulletinBottomScrollTop(wrap) {
   const maxTop = Math.max(wrap.scrollHeight - wrap.clientHeight, 0);
   const wrapTop = wrap.getBoundingClientRect().top;
+  const stickyOffset = syncBulletinStickyOffset(wrap);
   const rowStarts = Array.from(wrap.querySelectorAll(".bulletin-row"))
-    .map((row) => row.getBoundingClientRect().top - wrapTop + wrap.scrollTop)
+    .map((row) => row.getBoundingClientRect().top - wrapTop + wrap.scrollTop - stickyOffset)
     .filter((top) => top > 8 && top <= maxTop + 8);
 
   return rowStarts.at(-1) ?? maxTop;
