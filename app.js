@@ -68,6 +68,10 @@ function bindEvents() {
   document.getElementById("openBulletinWindowBtn").addEventListener("click", openBulletinWindow);
   document.getElementById("bulletinScrollInterval").addEventListener("change", updateBulletinScrollSettings);
   document.getElementById("bulletinScrollDuration").addEventListener("change", updateBulletinScrollSettings);
+  window.addEventListener("resize", () => scheduleBulletinAutoScroll({ resetPosition: false }));
+  document.addEventListener("fullscreenchange", () => {
+    window.setTimeout(() => scheduleBulletinAutoScroll({ resetPosition: false }), 0);
+  });
 
   document.getElementById("reservationForm").addEventListener("submit", submitReservation);
   document.querySelector("#reservationForm select[name='equipment_id']").addEventListener("change", syncReservationEquipmentState);
@@ -1738,7 +1742,9 @@ function updateBulletinScrollSettings() {
   scheduleBulletinAutoScroll();
 }
 
-function scheduleBulletinAutoScroll() {
+function scheduleBulletinAutoScroll(options = {}) {
+  const resetPosition = options.resetPosition !== false;
+
   if (state.bulletinScroll.timerId) {
     window.clearInterval(state.bulletinScroll.timerId);
     state.bulletinScroll.timerId = null;
@@ -1754,8 +1760,13 @@ function scheduleBulletinAutoScroll() {
     return;
   }
 
-  wrap.scrollTo({ top: 0, behavior: "auto" });
-  state.bulletinScroll.direction = "down";
+  if (resetPosition) {
+    wrap.scrollTo({ top: 0, behavior: "auto" });
+    state.bulletinScroll.direction = "down";
+  } else {
+    const maxTop = Math.max(wrap.scrollHeight - wrap.clientHeight, 0);
+    state.bulletinScroll.direction = wrap.scrollTop >= maxTop - 8 ? "up" : "down";
+  }
   state.bulletinScroll.timerId = window.setInterval(() => {
     stepBulletinAutoScroll();
   }, state.bulletinScroll.intervalSeconds * 1000);

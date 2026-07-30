@@ -5,8 +5,8 @@
 - Project: Reliability Lab Reservation
 - Root: `D:\py\SNR.github.io`
 - Contract: `project_contract.yml`
-- Current focus: Keep the GitHub Pages Supabase frontend maintainable and document the handoff for the next owner.
-- Last updated: 2026-07-13
+- Current focus: Keep the GitHub Pages Supabase frontend maintainable and stabilize the bulletin auto-scroll.
+- Last updated: 2026-07-30
 
 ## Stable Facts
 
@@ -21,6 +21,14 @@
 - Supabase permission policy changes remain intentionally out of scope.
 
 ## Recent Entries
+
+### 2026-07-30
+
+- Focus: Repair bulletin board auto-scroll on the hosted frontend.
+- Changed: Constrained `.bulletin-wrap` to a viewport-based height, preserved the scroll direction across resize/fullscreen changes, and added static regression assertions.
+- Learned: The prior `min-height` let the bulletin container grow to its full content height (`scrollHeight === clientHeight`), so the scheduler returned without starting its interval.
+- Verification: Browser probe passed at desktop, fullscreen, and mobile sizes; static bulletin test and JavaScript syntax check passed.
+- Next: Push the hosted frontend fix after the full verification pass.
 
 ### 2026-07-13
 
