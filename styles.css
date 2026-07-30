@@ -641,6 +641,7 @@ textarea:focus {
   height: clamp(320px, calc(100vh - 250px), 70vh);
   min-height: 320px;
   overflow-y: auto;
+  scroll-snap-type: y mandatory;
 }
 
 .gantt-scale {
@@ -681,6 +682,8 @@ textarea:focus {
 
 .bulletin-row {
   min-height: 108px;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
 }
 
 .gantt-row:last-child {

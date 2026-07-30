@@ -25,10 +25,10 @@
 ### 2026-07-30
 
 - Focus: Repair bulletin board auto-scroll on the hosted frontend.
-- Changed: Constrained `.bulletin-wrap` to a viewport-based height, preserved the scroll direction across resize/fullscreen changes, and added static regression assertions.
+- Changed: Constrained `.bulletin-wrap` to a viewport-based height, limited auto-scroll to fullscreen playback, aligned page transitions to bulletin rows, stopped/reset scrolling on fullscreen exit, and added static regression assertions.
 - Learned: The prior `min-height` let the bulletin container grow to its full content height (`scrollHeight === clientHeight`), so the scheduler returned without starting its interval.
-- Verification: Browser probe passed at desktop, fullscreen, and mobile sizes; static bulletin test and JavaScript syntax check passed.
-- Next: Push the hosted frontend fix after the full verification pass.
+- Verification: Browser probe confirmed stable normal view, row-aligned fullscreen transitions, and no scrolling after fullscreen exit; full project verification is pending.
+- Next: Run the full verification pass and push the hosted frontend fix.
 
 ### 2026-07-13
 

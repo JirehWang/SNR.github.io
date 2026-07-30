@@ -39,7 +39,9 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn("function openBulletinFullscreen()", js)
         self.assertIn("function openBulletinWindow()", js)
         self.assertIn("function scheduleBulletinAutoScroll(options = {})", js)
+        self.assertIn("function stopBulletinAutoScroll(", js)
         self.assertIn("function stepBulletinAutoScroll()", js)
+        self.assertIn("function getBulletinBottomScrollTop(", js)
         self.assertIn("function updateBulletinScrollSettings()", js)
         self.assertIn('window.addEventListener("resize",', js)
         self.assertIn('document.addEventListener("fullscreenchange",', js)
@@ -54,6 +56,8 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn(".bulletin-panel", css)
         self.assertIn(".bulletin-wrap", css)
         self.assertIn("height: clamp(", css)
+        self.assertIn("scroll-snap-type: y mandatory", css)
+        self.assertIn(".bulletin-row", css)
         self.assertIn(".bulletin-controls", css)
         self.assertIn(".bulletin-bar", css)
 

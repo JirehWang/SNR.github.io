@@ -68,10 +68,8 @@ function bindEvents() {
   document.getElementById("openBulletinWindowBtn").addEventListener("click", openBulletinWindow);
   document.getElementById("bulletinScrollInterval").addEventListener("change", updateBulletinScrollSettings);
   document.getElementById("bulletinScrollDuration").addEventListener("change", updateBulletinScrollSettings);
-  window.addEventListener("resize", () => scheduleBulletinAutoScroll({ resetPosition: false }));
-  document.addEventListener("fullscreenchange", () => {
-    window.setTimeout(() => scheduleBulletinAutoScroll({ resetPosition: false }), 0);
-  });
+  window.addEventListener("resize", handleBulletinViewportChange);
+  document.addEventListener("fullscreenchange", handleBulletinFullscreenChange);
 
   document.getElementById("reservationForm").addEventListener("submit", submitReservation);
   document.querySelector("#reservationForm select[name='equipment_id']").addEventListener("change", syncReservationEquipmentState);
@@ -1742,16 +1740,31 @@ function updateBulletinScrollSettings() {
   scheduleBulletinAutoScroll();
 }
 
+function handleBulletinViewportChange() {
+  if (document.fullscreenElement) {
+    scheduleBulletinAutoScroll({ resetPosition: false });
+  } else {
+    stopBulletinAutoScroll();
+  }
+}
+
+function handleBulletinFullscreenChange() {
+  window.setTimeout(() => {
+    if (document.fullscreenElement) {
+      scheduleBulletinAutoScroll({ resetPosition: true });
+    } else {
+      stopBulletinAutoScroll({ resetPosition: true });
+    }
+  }, 0);
+}
+
 function scheduleBulletinAutoScroll(options = {}) {
   const resetPosition = options.resetPosition !== false;
-
-  if (state.bulletinScroll.timerId) {
-    window.clearInterval(state.bulletinScroll.timerId);
-    state.bulletinScroll.timerId = null;
-  }
+  stopBulletinAutoScroll();
 
   const wrap = document.querySelector(".bulletin-wrap");
   if (!wrap) return;
+  if (!document.fullscreenElement) return;
 
   const overflow = wrap.scrollHeight - wrap.clientHeight;
   if (overflow <= 8) {
@@ -1772,6 +1785,30 @@ function scheduleBulletinAutoScroll(options = {}) {
   }, state.bulletinScroll.intervalSeconds * 1000);
 }
 
+function stopBulletinAutoScroll(options = {}) {
+  const resetPosition = options.resetPosition === true;
+  if (state.bulletinScroll.timerId) {
+    window.clearInterval(state.bulletinScroll.timerId);
+    state.bulletinScroll.timerId = null;
+  }
+
+  if (resetPosition) {
+    const wrap = document.querySelector(".bulletin-wrap");
+    wrap?.scrollTo({ top: 0, behavior: "auto" });
+  }
+  state.bulletinScroll.direction = "down";
+}
+
+function getBulletinBottomScrollTop(wrap) {
+  const maxTop = Math.max(wrap.scrollHeight - wrap.clientHeight, 0);
+  const wrapTop = wrap.getBoundingClientRect().top;
+  const rowStarts = Array.from(wrap.querySelectorAll(".bulletin-row"))
+    .map((row) => row.getBoundingClientRect().top - wrapTop + wrap.scrollTop)
+    .filter((top) => top > 8 && top <= maxTop + 8);
+
+  return rowStarts.at(-1) ?? maxTop;
+}
+
 function stepBulletinAutoScroll() {
   const wrap = document.querySelector(".bulletin-wrap");
   if (!wrap) return;
@@ -1783,7 +1820,9 @@ function stepBulletinAutoScroll() {
     return;
   }
 
-  const targetTop = state.bulletinScroll.direction === "down" ? maxTop : 0;
+  const targetTop = state.bulletinScroll.direction === "down"
+    ? getBulletinBottomScrollTop(wrap)
+    : 0;
   wrap.style.scrollBehavior = "smooth";
   wrap.scrollTo({ top: targetTop, behavior: "smooth" });
   window.setTimeout(() => {
