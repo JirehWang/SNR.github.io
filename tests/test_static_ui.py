@@ -185,6 +185,8 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn('id="reservationDetailCancelBtn"', html)
         self.assertIn(">專案完成<", html)
         self.assertIn(">專案取消<", html)
+        self.assertIn('class="project-complete"', html)
+        self.assertIn('class="form-actions reservation-detail-actions"', html)
         self.assertIn('id="reservationEditEmail"', html)
         self.assertIn('id="reservationEditUnlockBtn"', html)
         self.assertIn('id="reservationEditSaveBtn"', html)

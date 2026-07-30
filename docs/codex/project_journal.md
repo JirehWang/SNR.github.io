@@ -24,6 +24,11 @@
 
 ### 2026-07-30
 
+- Focus: Polish the reservation project action buttons.
+- Changed: Kept save/copy as secondary buttons, made 專案完成 a success-colored action, kept 專案取消 in the danger style, and normalized the action-row button heights and separation.
+- Verification: Browser computed-style check confirmed all three action buttons share a 40px height and render with the intended colors.
+- Next: Push the hosted frontend polish and confirm the Pages asset update.
+
 - Focus: Route reservation status operations through the project detail interface.
 - Changed: Replaced reservation-list completion/cancellation actions with one 編輯 button; renamed the detail actions to 專案完成 and 專案取消, added completion confirmation, required a cancellation reason, and made completed/cancelled reservations read-only.
 - Verification: Static UI regression checks, 19 project tests, JavaScript syntax check, and diff check passed; browser visual verification is next.
