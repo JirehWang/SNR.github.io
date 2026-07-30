@@ -24,6 +24,12 @@
 
 ### 2026-07-30
 
+- Focus: Make the bulletin scroll duration setting control the actual animation.
+- Changed: Replaced browser-defined smooth scrolling with a `requestAnimationFrame` animation driven by `durationSeconds`; overlapping animation frames are cancelled when playback stops or settings change.
+- Learned: The old duration value only controlled when `scrollBehavior` was cleared, while the browser chose the actual smooth-scroll duration.
+- Verification: Focused static regression check and JavaScript syntax check passed; browser playback was exercised with a 10-second interval as requested.
+- Next: Monitor the GitHub Pages rollout after pushing the hosted frontend fix.
+
 - Focus: Correct the sticky-header offset in bulletin row snapping.
 - Changed: Added a measured sticky-header offset to the scroll snap padding and bottom target calculation so every landing row starts immediately below the date header.
 - Learned: The date header is 41 CSS pixels in the current layout; without `scroll-padding-top`, mandatory snapping moved the first row to `scrollTop=41` and hid its first 41 pixels.

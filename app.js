@@ -25,6 +25,7 @@ const state = {
     intervalSeconds: 30,
     durationSeconds: 6,
     timerId: null,
+    animationFrameId: null,
     direction: "down",
   },
 };
@@ -1788,6 +1789,7 @@ function scheduleBulletinAutoScroll(options = {}) {
 
 function stopBulletinAutoScroll(options = {}) {
   const resetPosition = options.resetPosition === true;
+  cancelBulletinScrollAnimation();
   if (state.bulletinScroll.timerId) {
     window.clearInterval(state.bulletinScroll.timerId);
     state.bulletinScroll.timerId = null;
@@ -1798,6 +1800,41 @@ function stopBulletinAutoScroll(options = {}) {
     wrap?.scrollTo({ top: 0, behavior: "auto" });
   }
   state.bulletinScroll.direction = "down";
+}
+
+function cancelBulletinScrollAnimation() {
+  if (state.bulletinScroll.animationFrameId === null) return;
+  window.cancelAnimationFrame(state.bulletinScroll.animationFrameId);
+  state.bulletinScroll.animationFrameId = null;
+}
+
+function animateBulletinScroll(wrap, targetTop) {
+  cancelBulletinScrollAnimation();
+
+  const startTop = wrap.scrollTop;
+  const distance = targetTop - startTop;
+  const durationMs = Math.max(state.bulletinScroll.durationSeconds * 1000, 1);
+  if (Math.abs(distance) < 1) {
+    wrap.scrollTop = targetTop;
+    return;
+  }
+
+  const startedAt = window.performance.now();
+  const tick = (timestamp) => {
+    const progress = Math.min((timestamp - startedAt) / durationMs, 1);
+    const easedProgress = progress < 0.5
+      ? 2 * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+    wrap.scrollTop = startTop + distance * easedProgress;
+
+    if (progress < 1) {
+      state.bulletinScroll.animationFrameId = window.requestAnimationFrame(tick);
+    } else {
+      state.bulletinScroll.animationFrameId = null;
+    }
+  };
+
+  state.bulletinScroll.animationFrameId = window.requestAnimationFrame(tick);
 }
 
 function getBulletinStickyOffset(wrap) {
@@ -1826,6 +1863,7 @@ function getBulletinBottomScrollTop(wrap) {
 function stepBulletinAutoScroll() {
   const wrap = document.querySelector(".bulletin-wrap");
   if (!wrap) return;
+  if (state.bulletinScroll.animationFrameId !== null) return;
 
   const maxTop = Math.max(wrap.scrollHeight - wrap.clientHeight, 0);
   if (maxTop <= 8) {
@@ -1837,11 +1875,7 @@ function stepBulletinAutoScroll() {
   const targetTop = state.bulletinScroll.direction === "down"
     ? getBulletinBottomScrollTop(wrap)
     : 0;
-  wrap.style.scrollBehavior = "smooth";
-  wrap.scrollTo({ top: targetTop, behavior: "smooth" });
-  window.setTimeout(() => {
-    wrap.style.scrollBehavior = "";
-  }, state.bulletinScroll.durationSeconds * 1000);
+  animateBulletinScroll(wrap, targetTop);
   state.bulletinScroll.direction = state.bulletinScroll.direction === "down" ? "up" : "down";
 }
 
