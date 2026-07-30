@@ -24,6 +24,11 @@
 
 ### 2026-07-30
 
+- Focus: Calculate dashboard reservation hours within the displayed week.
+- Changed: Clipped each active reservation to `state.weekStart` through seven days later before summing hours; cancellation flow review found one reason prompt and no second confirmation dialog.
+- Verification: Regression checks for weekly clipping and the single cancellation reason prompt, 19 project tests, JavaScript syntax check, and diff check passed.
+- Next: Push the hosted frontend fix and confirm the Pages asset update.
+
 - Focus: Set the bulletin playback defaults requested by the user.
 - Changed: Kept the scroll interval default at 30 seconds and changed the scroll animation duration default to 1 second in both HTML and JavaScript fallbacks.
 - Verification: Red-green static UI regression check, 19 project tests, JavaScript syntax check, and diff check passed.

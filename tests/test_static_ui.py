@@ -38,6 +38,9 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn("function renderGantt()", js)
         self.assertIn("function renderBulletinBoard()", js)
         self.assertIn("function renderGanttSurface(", js)
+        self.assertIn("function getReservationHoursWithinWeek(", js)
+        self.assertIn("Math.min(reservationEnd, weekEnd)", js)
+        self.assertIn("Math.max(reservationStart, weekStart)", js)
         self.assertIn("function openBulletinFullscreen()", js)
         self.assertIn("function openBulletinWindow()", js)
         self.assertIn("function scheduleBulletinAutoScroll(options = {})", js)
@@ -61,6 +64,10 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertNotIn("測試人：", js)
         self.assertNotIn("測試期間：", js)
         self.assertIn("project_name", js)
+
+        cancel_flow = js[js.index("async function cancelReservation"):js.index("async function completeReservation")]
+        self.assertIn("window.prompt", cancel_flow)
+        self.assertNotIn("window.confirm", cancel_flow)
         self.assertIn(".gantt-chart", css)
         self.assertIn(".gantt-bar", css)
         self.assertIn(".bulletin-panel", css)

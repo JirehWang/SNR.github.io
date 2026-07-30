@@ -374,9 +374,7 @@ function renderDashboardMetrics() {
   const maintenance = state.equipment.filter((item) => item.status === "maintenance" && item.is_active).length;
   const offline = state.equipment.filter((item) => item.status === "offline" || !item.is_active).length;
   const reservedHours = activeReservations.reduce((total, reservation) => {
-    const start = new Date(reservation.start_time).getTime();
-    const end = new Date(reservation.end_time).getTime();
-    return total + Math.max(end - start, 0) / 36e5;
+    return total + getReservationHoursWithinWeek(reservation);
   }, 0);
 
   const metrics = [
@@ -394,6 +392,18 @@ function renderDashboardMetrics() {
       <em>${escapeHtml(item.hint)}</em>
     </article>
   `).join("");
+}
+
+function getReservationHoursWithinWeek(reservation) {
+  const weekStart = state.weekStart.getTime();
+  const weekEnd = addDays(state.weekStart, 7).getTime();
+  const reservationStart = new Date(reservation.start_time).getTime();
+  const reservationEnd = new Date(reservation.end_time).getTime();
+  if (!Number.isFinite(reservationStart) || !Number.isFinite(reservationEnd)) return 0;
+
+  const clippedStart = Math.max(reservationStart, weekStart);
+  const clippedEnd = Math.min(reservationEnd, weekEnd);
+  return Math.max(clippedEnd - clippedStart, 0) / 36e5;
 }
 
 function renderEquipmentOptions() {
