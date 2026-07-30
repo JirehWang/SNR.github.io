@@ -24,6 +24,11 @@
 
 ### 2026-07-30
 
+- Focus: Set the bulletin playback defaults requested by the user.
+- Changed: Kept the scroll interval default at 30 seconds and changed the scroll animation duration default to 1 second in both HTML and JavaScript fallbacks.
+- Verification: Red-green static UI regression check, 19 project tests, JavaScript syntax check, and diff check passed.
+- Next: Push the hosted frontend fix and confirm the Pages asset update.
+
 - Focus: Make the bulletin scroll duration setting control the actual animation.
 - Changed: Replaced browser-defined smooth scrolling with a `requestAnimationFrame` animation driven by `durationSeconds`; overlapping animation frames are cancelled when playback stops or settings change.
 - Learned: The old duration value only controlled when `scrollBehavior` was cleared, while the browser chose the actual smooth-scroll duration.

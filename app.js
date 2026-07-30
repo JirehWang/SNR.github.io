@@ -23,7 +23,7 @@ const state = {
   },
   bulletinScroll: {
     intervalSeconds: 30,
-    durationSeconds: 6,
+    durationSeconds: 1,
     timerId: null,
     animationFrameId: null,
     direction: "down",
@@ -1735,7 +1735,7 @@ function updateBulletinScrollSettings() {
   const intervalInput = document.getElementById("bulletinScrollInterval");
   const durationInput = document.getElementById("bulletinScrollDuration");
   state.bulletinScroll.intervalSeconds = clampNumber(intervalInput.value, 5, 300, 30);
-  state.bulletinScroll.durationSeconds = clampNumber(durationInput.value, 1, 30, 6);
+  state.bulletinScroll.durationSeconds = clampNumber(durationInput.value, 1, 30, 1);
   intervalInput.value = String(state.bulletinScroll.intervalSeconds);
   durationInput.value = String(state.bulletinScroll.durationSeconds);
   scheduleBulletinAutoScroll();
