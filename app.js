@@ -11,6 +11,11 @@ const state = {
   requesters: [],
   weekStart: startOfWeek(new Date()),
   activeView: "reservation",
+  reservationList: {
+    status: "open",
+    page: 1,
+    pageSize: 10,
+  },
   editingEquipmentId: null,
   editingRequesterId: null,
   equipmentFormDirty: false,
@@ -95,6 +100,10 @@ function bindEvents() {
   document.querySelectorAll("[data-view-target]").forEach((button) => {
     button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
   });
+  document.getElementById("reservationOpenTab").addEventListener("click", () => setReservationListStatus("open"));
+  document.getElementById("reservationClosedTab").addEventListener("click", () => setReservationListStatus("closed"));
+  document.getElementById("reservationPrevPage").addEventListener("click", () => moveReservationListPage(-1));
+  document.getElementById("reservationNextPage").addEventListener("click", () => moveReservationListPage(1));
 }
 
 function hydrateViewFromLocation() {
@@ -221,8 +230,6 @@ async function loadEquipment() {
 }
 
 async function loadReservations() {
-  const fromIso = dateToIso(state.weekStart);
-  const toIso = dateToIso(addDays(state.weekStart, 7));
   const { data, error } = await state.client
     .from("reservations")
     .select(`
@@ -245,8 +252,6 @@ async function loadReservations() {
       created_at,
       updated_at
     `)
-    .lt("start_time", toIso)
-    .gt("end_time", fromIso)
     .order("start_time", { ascending: true });
 
   assertNoError(error, "讀取預約資料失敗");
@@ -365,7 +370,7 @@ function renderViewState() {
 
 function renderDashboardMetrics() {
   const root = document.getElementById("dashboardMetrics");
-  const activeReservations = state.reservations.filter((item) => {
+  const activeReservations = getReservationsWithinWeek().filter((item) => {
     const effectiveStatus = getEffectiveReservationStatus(item);
     return effectiveStatus !== "cancelled" && effectiveStatus !== "checked_out";
   });
@@ -404,6 +409,19 @@ function getReservationHoursWithinWeek(reservation) {
   const clippedStart = Math.max(reservationStart, weekStart);
   const clippedEnd = Math.min(reservationEnd, weekEnd);
   return Math.max(clippedEnd - clippedStart, 0) / 36e5;
+}
+
+function getReservationsWithinWeek() {
+  const weekStart = state.weekStart.getTime();
+  const weekEnd = addDays(state.weekStart, 7).getTime();
+  return state.reservations.filter((reservation) => {
+    const reservationStart = new Date(reservation.start_time).getTime();
+    const reservationEnd = new Date(reservation.end_time).getTime();
+    return Number.isFinite(reservationStart)
+      && Number.isFinite(reservationEnd)
+      && reservationStart < weekEnd
+      && reservationEnd > weekStart;
+  });
 }
 
 function renderEquipmentOptions() {
@@ -628,7 +646,7 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
       lane.classList.add("is-limited");
     }
 
-    const reservations = state.reservations.filter((reservation) =>
+    const reservations = getReservationsWithinWeek().filter((reservation) =>
       Number(reservation.equipment_id) === Number(equipment.id) &&
       reservation.status !== "cancelled"
     );
@@ -974,7 +992,7 @@ function renderEquipmentScheduleDialog(equipment) {
   const list = document.getElementById("equipmentScheduleList");
   if (!title || !subtitle || !scale || !chart || !list) return;
 
-  const reservations = state.reservations.filter((reservation) =>
+  const reservations = getReservationsWithinWeek().filter((reservation) =>
     Number(reservation.equipment_id) === Number(equipment.id) &&
     reservation.status !== "cancelled"
   );
@@ -1229,16 +1247,39 @@ function getReservationDetailText(reservation) {
 
 function renderReservationRows() {
   const rows = document.getElementById("reservationRows");
+  const openTab = document.getElementById("reservationOpenTab");
+  const closedTab = document.getElementById("reservationClosedTab");
+  const previousPage = document.getElementById("reservationPrevPage");
+  const nextPage = document.getElementById("reservationNextPage");
+  const pageLabel = document.getElementById("reservationPageLabel");
   rows.innerHTML = "";
 
-  if (!state.reservations.length) {
+  const isClosedTab = state.reservationList.status === "closed";
+  const filteredReservations = state.reservations.filter((reservation) => {
+    const isClosed = ["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation));
+    return isClosedTab ? isClosed : !isClosed;
+  });
+  const totalPages = Math.max(Math.ceil(filteredReservations.length / state.reservationList.pageSize), 1);
+  state.reservationList.page = Math.min(Math.max(state.reservationList.page, 1), totalPages);
+  const pageStart = (state.reservationList.page - 1) * state.reservationList.pageSize;
+  const pageReservations = filteredReservations.slice(pageStart, pageStart + state.reservationList.pageSize);
+
+  openTab.classList.toggle("active", !isClosedTab);
+  openTab.setAttribute("aria-selected", String(!isClosedTab));
+  closedTab.classList.toggle("active", isClosedTab);
+  closedTab.setAttribute("aria-selected", String(isClosedTab));
+  previousPage.disabled = state.reservationList.page <= 1;
+  nextPage.disabled = state.reservationList.page >= totalPages;
+  pageLabel.textContent = `${isClosedTab ? "已結案" : "未結案"}｜第 ${state.reservationList.page} / ${totalPages} 頁，共 ${filteredReservations.length} 個專案`;
+
+  if (!pageReservations.length) {
     const tr = document.createElement("tr");
     tr.innerHTML = '<td colspan="6" class="muted">本週尚無預約資料。</td>';
     rows.appendChild(tr);
     return;
   }
 
-  state.reservations.forEach((reservation) => {
+  pageReservations.forEach((reservation) => {
     const view = getReservationViewModel(reservation);
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -1260,6 +1301,27 @@ function renderReservationRows() {
 
     rows.appendChild(tr);
   });
+}
+
+function setReservationListStatus(status) {
+  if (!["open", "closed"].includes(status)) return;
+  state.reservationList.status = status;
+  state.reservationList.page = 1;
+  renderReservationRows();
+}
+
+function moveReservationListPage(direction) {
+  const isClosedTab = state.reservationList.status === "closed";
+  const filteredReservations = state.reservations.filter((reservation) => {
+    const isClosed = ["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation));
+    return isClosedTab ? isClosed : !isClosed;
+  });
+  const totalPages = Math.max(Math.ceil(filteredReservations.length / state.reservationList.pageSize), 1);
+  state.reservationList.page = Math.min(
+    Math.max(state.reservationList.page + direction, 1),
+    totalPages,
+  );
+  renderReservationRows();
 }
 
 async function submitReservation(event) {

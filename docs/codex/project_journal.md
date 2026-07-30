@@ -24,6 +24,11 @@
 
 ### 2026-07-30
 
+- Focus: Expand reservation history and organize the project list.
+- Changed: Loaded all reservations for the list, split it into 未結案 and 已結案 tabs, added ten-project pagination, and kept the gantt/dashboard data scoped to the selected week; moved project status actions to the right side of the detail action bar.
+- Verification: Browser checks confirmed 10 rows per page, page navigation, closed-project filtering, right-aligned status actions, and equal 40px action-button heights.
+- Next: Push the hosted frontend update and confirm the Pages asset update.
+
 - Focus: Polish the reservation project action buttons.
 - Changed: Kept save/copy as secondary buttons, made 專案完成 a success-colored action, kept 專案取消 in the danger style, and normalized the action-row button heights and separation.
 - Verification: Browser computed-style check confirmed all three action buttons share a 40px height and render with the intended colors.

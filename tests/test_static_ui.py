@@ -187,6 +187,7 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn(">專案取消<", html)
         self.assertIn('class="project-complete"', html)
         self.assertIn('class="form-actions reservation-detail-actions"', html)
+        self.assertIn('class="reservation-status-actions"', html)
         self.assertIn('id="reservationEditEmail"', html)
         self.assertIn('id="reservationEditUnlockBtn"', html)
         self.assertIn('id="reservationEditSaveBtn"', html)
@@ -261,6 +262,28 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn('action: "completed"', js)
         self.assertIn(".gantt-bar.is-complete", css)
         self.assertIn(".badge.checked_out", css)
+
+    def test_reservation_list_is_paginated_and_split_by_project_status(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        css = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="reservationOpenTab"', html)
+        self.assertIn('id="reservationClosedTab"', html)
+        self.assertIn('id="reservationPrevPage"', html)
+        self.assertIn('id="reservationNextPage"', html)
+        self.assertIn('id="reservationPageLabel"', html)
+        self.assertIn('status: "open"', js)
+        self.assertIn('pageSize: 10', js)
+        self.assertIn("function getReservationsWithinWeek(", js)
+        self.assertIn("function setReservationListStatus(", js)
+        self.assertIn("function moveReservationListPage(", js)
+        self.assertIn("const pageReservations = filteredReservations.slice(", js)
+        self.assertIn("getReservationsWithinWeek().filter", js)
+        self.assertNotIn('.lt("start_time", toIso)', js)
+        self.assertNotIn('.gt("end_time", fromIso)', js)
+        self.assertIn(".reservation-list-toolbar", css)
+        self.assertIn(".reservation-status-actions", css)
 
     def test_root_entry_is_the_real_frontend(self):
         root_html = (ROOT / "index.html").read_text(encoding="utf-8")

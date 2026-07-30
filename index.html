@@ -67,7 +67,18 @@
               <div class="section-title">
                 <div>
                   <h2>預約清單</h2>
-                  <p>列出本週所有預約，點擊編輯進入專案介面進行修改與狀態操作。</p>
+                  <p>列出全部專案，分為未結案與已結案，每頁顯示 10 個專案。</p>
+                </div>
+              </div>
+              <div class="reservation-list-toolbar">
+                <div class="reservation-list-tabs" role="tablist" aria-label="專案狀態">
+                  <button type="button" id="reservationOpenTab" class="reservation-list-tab active" role="tab" aria-selected="true">未結案</button>
+                  <button type="button" id="reservationClosedTab" class="reservation-list-tab" role="tab" aria-selected="false">已結案</button>
+                </div>
+                <div class="reservation-pagination" aria-label="預約清單分頁">
+                  <button type="button" id="reservationPrevPage" class="secondary small-action">上一頁</button>
+                  <span id="reservationPageLabel" class="muted">未結案｜第 1 / 1 頁，共 0 個專案</span>
+                  <button type="button" id="reservationNextPage" class="secondary small-action">下一頁</button>
                 </div>
               </div>
               <div class="table-wrap">
@@ -363,9 +374,11 @@
       </section>
       <div class="form-actions reservation-detail-actions">
         <button type="button" id="reservationDetailCopyBtn" class="secondary">複製明細</button>
-        <button type="button" id="reservationDetailCompleteBtn" class="project-complete">專案完成</button>
-        <button type="button" id="reservationDetailCancelBtn" class="danger-link">專案取消</button>
         <span id="reservationDetailCopyStatus" role="status"></span>
+        <div class="reservation-status-actions">
+          <button type="button" id="reservationDetailCompleteBtn" class="project-complete">專案完成</button>
+          <button type="button" id="reservationDetailCancelBtn" class="danger-link">專案取消</button>
+        </div>
       </div>
     </form>
   </dialog>
