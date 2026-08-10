@@ -49,15 +49,18 @@
               <div class="section-title with-controls">
                 <div>
                   <h2>設備使用狀況</h2>
-                  <p>用甘特圖檢視本週設備使用者、專案名稱與時段安排。</p>
+                  <p>從今天起顯示一個月，直向捲動查看設備、橫向捲動查看日期。</p>
                 </div>
-                <div class="week-controls">
-                  <button id="prevWeek" class="icon-btn" title="上一週" aria-label="上一週">&#8249;</button>
-                  <span id="weekLabel"></span>
-                  <button id="nextWeek" class="icon-btn" title="下一週" aria-label="下一週">&#8250;</button>
+                <div class="schedule-controls">
+                  <div class="date-navigation" aria-label="主預約月份導覽">
+                    <button type="button" id="schedulePrevMonth" class="icon-btn" title="上一個月" aria-label="上一個月">&#8249;</button>
+                    <button type="button" id="scheduleRangeLabel" class="date-range-label" aria-live="polite"></button>
+                    <button type="button" id="scheduleNextMonth" class="icon-btn" title="下一個月" aria-label="下一個月">&#8250;</button>
+                  </div>
+                  <button type="button" id="openReservationCreateDialogBtn" class="secondary">新增預約</button>
                 </div>
               </div>
-              <div class="gantt-wrap">
+              <div class="gantt-wrap gantt-schedule-wrap">
                 <div id="ganttScale" class="gantt-scale"></div>
                 <div id="ganttChart" class="gantt-chart"></div>
               </div>
@@ -130,6 +133,7 @@
                   部門
                   <input name="department" required value="PQE">
                 </label>
+                <p id="reservationRequesterCategory" class="requester-category-note wide" hidden></p>
                 <label class="wide">
                   專案名稱
                   <input name="project_name" required placeholder="例如：SNR-MVP / 客戶案號 / EVT-01">
@@ -162,6 +166,7 @@
                 </label>
                 <div class="form-actions wide">
                   <button type="submit">送出預約</button>
+                  <button type="button" id="reservationCreateDialogCloseBtn" class="ghost">取消</button>
                   <span id="formMessage" role="status"></span>
                 </div>
               </form>
@@ -306,9 +311,16 @@
                 <p>適合投影在電視牆的本週設備使用時程。</p>
               </div>
             <div class="week-controls">
-              <button id="bulletinPrevWeek" class="icon-btn" title="上一週" aria-label="上一週">&#8249;</button>
-              <span id="bulletinWeekLabel"></span>
-              <button id="bulletinNextWeek" class="icon-btn" title="下一週" aria-label="下一週">&#8250;</button>
+              <div class="date-navigation" aria-label="佈告欄月份導覽">
+                <button id="bulletinPrevMonth" type="button" class="icon-btn" title="上一個月" aria-label="上一個月">&#8249;</button>
+                <button id="bulletinMonthLabel" type="button" class="date-range-label" aria-live="polite"></button>
+                <button id="bulletinNextMonth" type="button" class="icon-btn" title="下一個月" aria-label="下一個月">&#8250;</button>
+              </div>
+              <div class="week-navigation" aria-label="佈告欄週次導覽">
+                <button id="bulletinPrevWeek" class="icon-btn" title="上一週" aria-label="上一週">&#8249;</button>
+                <span id="bulletinWeekLabel"></span>
+                <button id="bulletinNextWeek" class="icon-btn" title="下一週" aria-label="下一週">&#8250;</button>
+              </div>
               <button id="openBulletinWindowBtn" type="button" class="secondary">另開公佈欄</button>
               <button id="bulletinFullscreenBtn" type="button">全螢幕</button>
             </div>
@@ -334,6 +346,8 @@
       </div>
     </section>
   </main>
+
+  <dialog id="reservationCreateDialog" class="reservation-create-dialog"></dialog>
 
   <dialog id="reservationDetailDialog" class="reservation-detail-dialog">
     <form method="dialog" class="reservation-detail-shell">

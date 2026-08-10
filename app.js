@@ -2,6 +2,9 @@ const SUPABASE_URL = "https://sbqqylrnjfrrqwrdiiun.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNicXF5bHJuamZycnF3cmRpaXVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5Mzg1MTEsImV4cCI6MjA5ODUxNDUxMX0.DlOsiff8VpyBNB1BrvnR8ny6b0CXwziM6ZqaHDcHz0Y";
 
 const AUTO_REFRESH_MS = 60000;
+const SCHEDULE_EXTENSION_MONTHS = 6;
+const GANTT_DRAG_THRESHOLD_PX = 6;
+const GANTT_DISPLAY_DAYS = 31;
 
 const state = {
   client: null,
@@ -10,6 +13,13 @@ const state = {
   reservations: [],
   requesters: [],
   weekStart: startOfWeek(new Date()),
+  bulletinMonthStart: startOfMonth(new Date()),
+  scheduleStart: startOfDay(new Date()),
+  scheduleRangeStart: addMonths(startOfDay(new Date()), -SCHEDULE_EXTENSION_MONTHS),
+  scheduleRangeEnd: addMonths(addMonths(startOfDay(new Date()), 1), SCHEDULE_EXTENSION_MONTHS),
+  scheduleFocusDate: startOfDay(new Date()),
+  ganttDrag: null,
+  isExtendingSchedule: false,
   activeView: "reservation",
   reservationList: {
     status: "open",
@@ -50,6 +60,7 @@ statusText.validation = "驗證中";
 const dayNames = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
 
 document.addEventListener("DOMContentLoaded", async () => {
+  initializeReservationCreateDialog();
   bindEvents();
   hydrateViewFromLocation();
   initializeSupabase();
@@ -66,10 +77,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 function bindEvents() {
   document.getElementById("refreshBtn").addEventListener("click", () => connectAndLoad(true));
-  document.getElementById("prevWeek").addEventListener("click", () => moveWeek(-7));
-  document.getElementById("nextWeek").addEventListener("click", () => moveWeek(7));
-  document.getElementById("bulletinPrevWeek").addEventListener("click", () => moveWeek(-7));
-  document.getElementById("bulletinNextWeek").addEventListener("click", () => moveWeek(7));
+  document.getElementById("bulletinPrevMonth").addEventListener("click", () => moveBulletinMonth(-1));
+  document.getElementById("bulletinNextMonth").addEventListener("click", () => moveBulletinMonth(1));
   document.getElementById("bulletinFullscreenBtn").addEventListener("click", openBulletinFullscreen);
   document.getElementById("openBulletinWindowBtn").addEventListener("click", openBulletinWindow);
   document.getElementById("bulletinScrollInterval").addEventListener("change", updateBulletinScrollSettings);
@@ -79,6 +88,17 @@ function bindEvents() {
 
   document.getElementById("reservationForm").addEventListener("submit", submitReservation);
   document.querySelector("#reservationForm select[name='equipment_id']").addEventListener("change", syncReservationEquipmentState);
+  document.getElementById("openReservationCreateDialogBtn").addEventListener("click", () => openReservationCreateDialog());
+  document.getElementById("reservationCreateDialogCloseBtn").addEventListener("click", closeReservationCreateDialog);
+  document.getElementById("schedulePrevMonth").addEventListener("click", () => moveMainScheduleMonth(-1));
+  document.getElementById("scheduleNextMonth").addEventListener("click", () => moveMainScheduleMonth(1));
+  document.getElementById("scheduleRangeLabel").addEventListener("click", () => {
+    scrollMainScheduleToDate(state.scheduleFocusDate || state.scheduleStart);
+  });
+  const ganttWrap = document.querySelector(".gantt-schedule-wrap");
+  bindGanttDrag(ganttWrap);
+  ganttWrap?.addEventListener("scroll", handleMainGanttScroll, { passive: true });
+  window.addEventListener("resize", handleMainGanttResize);
 
   document.getElementById("equipmentForm").addEventListener("submit", submitEquipment);
   document.getElementById("equipmentForm").addEventListener("input", markEquipmentFormDirty);
@@ -96,6 +116,8 @@ function bindEvents() {
   document.querySelector("#reservationForm input[name='requester_name']").addEventListener("change", syncRequesterFields);
   document.querySelector("#reservationForm input[name='requester_email']").addEventListener("input", handleRequesterLookup);
   document.querySelector("#reservationForm input[name='requester_email']").addEventListener("change", syncRequesterFields);
+  document.querySelector("#reservationForm input[name='requester_email']").addEventListener("input", renderReservationRequesterCategory);
+  document.querySelector("#reservationForm input[name='department']").addEventListener("input", renderReservationRequesterCategory);
 
   document.querySelectorAll("[data-view-target]").forEach((button) => {
     button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
@@ -273,10 +295,10 @@ function renderAll() {
   renderRequesterOptions();
   renderRequesterSummary();
   renderEquipmentSummary();
+  renderViewState();
   renderGantt();
   renderBulletinBoard();
   renderReservationRows();
-  renderViewState();
   renderConnectionState();
   syncEquipmentForm();
   syncRequesterForm();
@@ -288,6 +310,38 @@ function markEquipmentFormDirty() {
 
 function markRequesterFormDirty() {
   state.requesterFormDirty = true;
+}
+
+function initializeReservationCreateDialog() {
+  const dialog = document.getElementById("reservationCreateDialog");
+  const panel = document.querySelector(".reservation-panel");
+  if (!dialog || !panel || dialog.contains(panel)) return;
+  dialog.appendChild(panel);
+}
+
+function openReservationCreateDialog(options = {}) {
+  const dialog = document.getElementById("reservationCreateDialog");
+  if (!dialog) return;
+  const form = document.getElementById("reservationForm");
+  form.reset();
+  setDefaultTimes(options);
+  document.getElementById("formMessage").textContent = "";
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeReservationCreateDialog() {
+  document.getElementById("reservationCreateDialog")?.close();
+}
+
+function openReservationFromGanttCell(equipment, date) {
+  if (!equipment.is_active || equipment.status !== "available") {
+    renderNotice("此設備目前不可預約。", "error");
+    return;
+  }
+  openReservationCreateDialog({
+    equipmentId: equipment.id,
+    startDate: date,
+  });
 }
 
 function suggestRequesterEmail(name) {
@@ -354,6 +408,11 @@ function setActiveView(viewName) {
   url.searchParams.set("view", viewName);
   window.history.replaceState({}, "", url);
   renderViewState();
+  if (viewName === "reservation") {
+    renderGantt({ scrollDate: state.scheduleFocusDate || state.scheduleStart });
+  } else if (viewName === "bulletin") {
+    renderBulletinBoard();
+  }
 }
 
 function renderViewState() {
@@ -412,15 +471,240 @@ function getReservationHoursWithinWeek(reservation) {
 }
 
 function getReservationsWithinWeek() {
-  const weekStart = state.weekStart.getTime();
-  const weekEnd = addDays(state.weekStart, 7).getTime();
+  const weekRange = getWeekRange();
+  return getReservationsWithinRange(weekRange.start, weekRange.end);
+}
+
+function getWeekRange() {
+  return {
+    start: startOfDay(state.weekStart),
+    end: addDays(startOfDay(state.weekStart), 7),
+    dayCount: 7,
+  };
+}
+
+function getFixedGanttDisplayRange(startDate = new Date()) {
+  const start = startOfDay(startDate);
+  const end = addDays(start, GANTT_DISPLAY_DAYS);
+  return {
+    start,
+    end,
+    dayCount: GANTT_DISPLAY_DAYS,
+  };
+}
+
+function getMonthlyScheduleRange(startDate = new Date()) {
+  return getFixedGanttDisplayRange(startDate);
+}
+
+function getMainScheduleRange() {
+  if (!(state.scheduleRangeStart instanceof Date) || !Number.isFinite(state.scheduleRangeStart.getTime())) {
+    state.scheduleRangeStart = addMonths(startOfDay(state.scheduleStart || new Date()), -SCHEDULE_EXTENSION_MONTHS);
+  }
+  if (!(state.scheduleRangeEnd instanceof Date) || !Number.isFinite(state.scheduleRangeEnd.getTime())) {
+    state.scheduleRangeEnd = addMonths(addMonths(startOfDay(state.scheduleFocusDate || new Date()), 1), SCHEDULE_EXTENSION_MONTHS);
+  }
+  if (state.scheduleRangeEnd <= state.scheduleRangeStart) {
+    state.scheduleRangeEnd = addMonths(state.scheduleRangeStart, SCHEDULE_EXTENSION_MONTHS + 1);
+  }
+  return {
+    start: startOfDay(state.scheduleRangeStart),
+    end: new Date(state.scheduleRangeEnd),
+    dayCount: Math.max(Math.round((state.scheduleRangeEnd.getTime() - state.scheduleRangeStart.getTime()) / 86400000), 1),
+  };
+}
+
+function getMainScheduleLabelRange() {
+  const range = getMainScheduleRange();
+  const latestStart = addDays(range.end, -1);
+  const focus = new Date(state.scheduleFocusDate || range.start);
+  const start = focus < range.start ? range.start : focus > latestStart ? latestStart : startOfDay(focus);
+  return getFixedGanttDisplayRange(start);
+}
+
+function updateMainScheduleLabel() {
+  const label = document.getElementById("scheduleRangeLabel");
+  if (!label) return;
+  const range = getMainScheduleLabelRange();
+  label.textContent = `${formatDate(range.start)} - ${formatDate(addDays(range.end, -1))}`;
+}
+
+function getMainScheduleDayWidth() {
+  const wrap = document.querySelector(".gantt-schedule-wrap");
+  return getGanttDisplayDayWidth(wrap);
+}
+
+function getGanttDisplayDayWidth(wrap) {
+  const availableWidth = Math.max((wrap?.clientWidth || 1280) - 220, 760);
+  return Math.max(Math.floor(availableWidth / GANTT_DISPLAY_DAYS), 24);
+}
+
+function getDateAtMainScheduleScroll(wrap = document.querySelector(".gantt-schedule-wrap")) {
+  const range = getMainScheduleRange();
+  const dayWidth = getMainScheduleDayWidth();
+  const dayOffset = Math.min(Math.max(Math.floor((wrap?.scrollLeft || 0) / dayWidth), 0), range.dayCount - 1);
+  return addDays(range.start, dayOffset);
+}
+
+function scrollMainScheduleToDate(date) {
+  const wrap = document.querySelector(".gantt-schedule-wrap");
+  if (!wrap) return;
+  const targetDate = startOfDay(date || state.scheduleFocusDate || state.scheduleStart || new Date());
+  ensureMainScheduleRangeForDate(targetDate);
+  const range = getMainScheduleRange();
+  const dayWidth = getMainScheduleDayWidth();
+  const dayOffset = Math.max(Math.round((targetDate.getTime() - range.start.getTime()) / 86400000), 0);
+  wrap.scrollLeft = dayOffset * dayWidth;
+  state.scheduleFocusDate = targetDate;
+  updateMainScheduleLabel();
+  syncMainGanttBarInfo();
+}
+
+function ensureMainScheduleRangeForDate(date) {
+  const targetDate = startOfDay(date);
+  let changed = false;
+  while (targetDate < state.scheduleRangeStart) {
+    state.scheduleRangeStart = addMonths(state.scheduleRangeStart, -SCHEDULE_EXTENSION_MONTHS);
+    changed = true;
+  }
+  while (addDays(targetDate, GANTT_DISPLAY_DAYS) > state.scheduleRangeEnd) {
+    state.scheduleRangeEnd = addMonths(state.scheduleRangeEnd, SCHEDULE_EXTENSION_MONTHS);
+    changed = true;
+  }
+  return changed;
+}
+
+function moveMainScheduleMonth(direction) {
+  const nextFocus = addMonths(state.scheduleFocusDate || state.scheduleStart || new Date(), direction);
+  state.scheduleFocusDate = startOfDay(nextFocus);
+  ensureMainScheduleRangeForDate(state.scheduleFocusDate);
+  renderGantt({ scrollDate: state.scheduleFocusDate });
+}
+
+function extendMainScheduleRange(direction, anchorDate = null) {
+  const wrap = document.querySelector(".gantt-schedule-wrap");
+  const scrollAnchor = anchorDate || getDateAtMainScheduleScroll(wrap);
+  if (direction < 0) {
+    state.scheduleRangeStart = addMonths(state.scheduleRangeStart, -SCHEDULE_EXTENSION_MONTHS);
+  } else {
+    state.scheduleRangeEnd = addMonths(state.scheduleRangeEnd, SCHEDULE_EXTENSION_MONTHS);
+  }
+  state.isExtendingSchedule = true;
+  renderGantt({ scrollDate: scrollAnchor });
+  window.requestAnimationFrame(() => {
+    scrollMainScheduleToDate(scrollAnchor);
+    state.isExtendingSchedule = false;
+  });
+}
+
+function handleMainGanttScroll(event) {
+  if (state.isExtendingSchedule) return;
+  const wrap = event.currentTarget;
+  const dayWidth = getMainScheduleDayWidth();
+  const edgeThreshold = dayWidth * 14;
+  if (wrap.scrollLeft < edgeThreshold) {
+    extendMainScheduleRange(-1, getDateAtMainScheduleScroll(wrap));
+    return;
+  }
+  if (wrap.scrollLeft + wrap.clientWidth > wrap.scrollWidth - edgeThreshold) {
+    extendMainScheduleRange(1, getDateAtMainScheduleScroll(wrap));
+    return;
+  }
+  const previousFocus = getMainScheduleLabelRange();
+  state.scheduleFocusDate = getDateAtMainScheduleScroll(wrap);
+  const nextFocus = getMainScheduleLabelRange();
+  const crossedMonth = previousFocus.start.getFullYear() !== nextFocus.start.getFullYear()
+    || previousFocus.start.getMonth() !== nextFocus.start.getMonth();
+  if (crossedMonth) {
+    renderGantt({ scrollDate: state.scheduleFocusDate });
+    return;
+  }
+  updateMainScheduleLabel();
+  syncMainGanttBarInfo();
+}
+
+function handleMainGanttResize() {
+  const wrap = document.querySelector(".gantt-schedule-wrap");
+  if (!wrap || !document.querySelector("#ganttChart .gantt-row")) return;
+  renderGantt({ scrollDate: state.scheduleFocusDate || state.scheduleStart });
+}
+
+function syncMainGanttBarInfo() {
+  const wrap = document.querySelector(".gantt-schedule-wrap");
+  const firstLabel = document.querySelector("#ganttChart .gantt-equipment-label");
+  if (!wrap || !firstLabel) return;
+
+  const wrapRect = wrap.getBoundingClientRect();
+  const labelRect = firstLabel.getBoundingClientRect();
+  const ganttLeft = labelRect.right;
+  const ganttRight = wrapRect.left + wrap.clientWidth;
+
+  document.querySelectorAll("#ganttChart .gantt-bar-info").forEach((info) => {
+    info.style.transform = "none";
+    const bar = info.closest(".gantt-bar");
+    if (!bar) return;
+    const barRect = bar.getBoundingClientRect();
+    if (barRect.left >= ganttLeft || barRect.right <= ganttLeft) return;
+
+    const naturalInfoRect = info.getBoundingClientRect();
+    const infoWidth = naturalInfoRect.width;
+    const desiredLeft = ganttLeft + 6;
+    const rightLimit = ganttRight - infoWidth - 6;
+    const targetLeft = Math.min(desiredLeft, rightLimit);
+    const offset = targetLeft - naturalInfoRect.left;
+    if (offset > 0) {
+      info.style.transform = `translateX(${offset.toFixed(2)}px)`;
+    }
+  });
+}
+
+function bindGanttDrag(wrap) {
+  if (!wrap) return;
+  wrap.addEventListener("pointerdown", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (event.button !== 0 || target?.closest("button, input, select, textarea, a")) return;
+    state.ganttDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      scrollLeft: wrap.scrollLeft,
+      dragging: false,
+    };
+  });
+  wrap.addEventListener("pointermove", (event) => {
+    if (!state.ganttDrag || state.ganttDrag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - state.ganttDrag.startX;
+    if (!state.ganttDrag.dragging && Math.abs(deltaX) < GANTT_DRAG_THRESHOLD_PX) return;
+    if (!state.ganttDrag.dragging) {
+      state.ganttDrag.dragging = true;
+      wrap.classList.add("is-dragging");
+      wrap.setPointerCapture(event.pointerId);
+    }
+    event.preventDefault();
+    wrap.scrollLeft = state.ganttDrag.scrollLeft - deltaX;
+  });
+  const stopDrag = (event) => {
+    if (!state.ganttDrag || state.ganttDrag.pointerId !== event.pointerId) return;
+    const wasDragging = state.ganttDrag.dragging;
+    state.ganttDrag = null;
+    if (wasDragging) wrap.classList.remove("is-dragging");
+    if (wrap.hasPointerCapture?.(event.pointerId)) {
+      wrap.releasePointerCapture(event.pointerId);
+    }
+  };
+  wrap.addEventListener("pointerup", stopDrag);
+  wrap.addEventListener("pointercancel", stopDrag);
+}
+
+function getReservationsWithinRange(startDate, endDate) {
+  const rangeStart = new Date(startDate).getTime();
+  const rangeEnd = new Date(endDate).getTime();
   return state.reservations.filter((reservation) => {
     const reservationStart = new Date(reservation.start_time).getTime();
     const reservationEnd = new Date(reservation.end_time).getTime();
     return Number.isFinite(reservationStart)
       && Number.isFinite(reservationEnd)
-      && reservationStart < weekEnd
-      && reservationEnd > weekStart;
+      && reservationStart < rangeEnd
+      && reservationEnd > rangeStart;
   });
 }
 
@@ -581,41 +865,61 @@ function cancelEquipmentEdit() {
   syncEquipmentForm();
 }
 
-function renderGantt() {
+function renderGantt(options = {}) {
+  const scheduleRange = getMainScheduleRange();
+  const scrollDate = options.scrollDate || state.scheduleFocusDate || scheduleRange.start;
   renderGanttSurface({
     scaleId: "ganttScale",
     chartId: "ganttChart",
-    labelId: "weekLabel",
+    labelId: "scheduleRangeLabel",
     variant: "default",
+    range: scheduleRange,
+  });
+  updateMainScheduleLabel();
+  window.requestAnimationFrame(() => {
+    scrollMainScheduleToDate(scrollDate);
+    syncMainGanttBarInfo();
   });
 }
 
 function renderBulletinBoard() {
+  const bulletinRange = getMonthlyScheduleRange(state.bulletinMonthStart);
   renderGanttSurface({
     scaleId: "bulletinScale",
     chartId: "bulletinChart",
-    labelId: "bulletinWeekLabel",
+    labelId: "bulletinMonthLabel",
     variant: "bulletin",
+    range: bulletinRange,
   });
   const stamp = document.getElementById("bulletinTimestamp");
   stamp.textContent = `更新時間 ${new Date().toLocaleString("zh-TW")}`;
   scheduleBulletinAutoScroll();
 }
 
-function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
+function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWeekRange() }) {
   const scale = document.getElementById(scaleId);
   const chart = document.getElementById(chartId);
   const labelNode = document.getElementById(labelId);
   if (labelNode) {
-    labelNode.textContent = `${formatDate(state.weekStart)} - ${formatDate(addDays(state.weekStart, 6))}`;
+    const labelRange = variant === "default" ? getMainScheduleLabelRange() : range;
+    labelNode.textContent = `${formatDate(labelRange.start)} - ${formatDate(addDays(labelRange.end, -1))}`;
   }
 
   if (!scale || !chart) return;
+  const dayWidth = variant === "default"
+    ? getMainScheduleDayWidth()
+    : getGanttDisplayDayWidth(document.querySelector(".bulletin-wrap"));
+  const minWidth = variant === "bulletin"
+    ? Math.max(1320, 220 + range.dayCount * dayWidth)
+    : 220 + range.dayCount * dayWidth;
+  scale.style.gridTemplateColumns = `220px repeat(${range.dayCount}, ${dayWidth}px)`;
+  scale.style.minWidth = `${minWidth}px`;
+  chart.style.minWidth = `${minWidth}px`;
   scale.innerHTML = `<div class="gantt-equipment-spacer ${variant === "bulletin" ? "bulletin-cell" : ""}">設備</div>`;
   chart.innerHTML = "";
 
-  for (let offset = 0; offset < 7; offset += 1) {
-    const date = addDays(state.weekStart, offset);
+  for (let offset = 0; offset < range.dayCount; offset += 1) {
+    const date = addDays(range.start, offset);
     const tick = document.createElement("div");
     tick.className = `gantt-day${variant === "bulletin" ? " bulletin-cell" : ""}`;
     tick.textContent = `${dayNames[date.getDay()]} ${formatDate(date)}`;
@@ -642,20 +946,38 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
 
     const lane = document.createElement("div");
     lane.className = `gantt-lane${variant === "bulletin" ? " bulletin-lane" : ""}`;
+    lane.style.setProperty("--gantt-day-count", String(range.dayCount));
     if (equipment.status !== "available" || !equipment.is_active) {
       lane.classList.add("is-limited");
     }
 
-    const reservations = getReservationsWithinWeek().filter((reservation) =>
+    const reservations = getReservationsWithinRange(range.start, range.end).filter((reservation) =>
       Number(reservation.equipment_id) === Number(equipment.id) &&
       reservation.status !== "cancelled"
     );
 
-    const stackedReservations = layoutStackedReservations(reservations);
+    const stackedReservations = layoutStackedReservations(reservations, range);
+    const viewportRange = variant === "default" ? getMainScheduleLabelRange() : range;
+    const viewportStackedReservations = layoutStackedReservations(
+      getReservationsIntersectingRange(reservations, viewportRange),
+      range,
+    );
+    const viewportReservationLevels = new Map(
+      viewportStackedReservations.map((item) => [item.reservation, item.level]),
+    );
+    stackedReservations.forEach((item) => {
+      item.renderLevel = viewportReservationLevels.has(item.reservation)
+        ? viewportReservationLevels.get(item.reservation)
+        : item.level;
+    });
     const visibleStackedReservations = getVisibleStackedReservations(stackedReservations, variant);
     const laneSummary = getGanttLaneSummary(stackedReservations, visibleStackedReservations);
+    const viewportStackCount = Math.max(
+      viewportStackedReservations.reduce((max, item) => Math.max(max, item.level + 1), 1),
+      1,
+    );
     const ganttMetrics = variant === "default"
-      ? getDefaultGanttMetrics(Math.max(stackedReservations[0]?.stackCount || 1, 1))
+      ? getDefaultGanttMetrics(viewportStackCount)
       : variant === "bulletin"
         ? getBulletinGanttMetrics(Math.max(stackedReservations[0]?.stackCount || 1, 1))
         : null;
@@ -673,19 +995,21 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
     visibleStackedReservations.forEach((stacked) => {
       const { reservation } = stacked;
       const view = getReservationViewModel(reservation);
+      const requesterCategory = getRequesterCategory(reservation);
       const bar = document.createElement("button");
       bar.type = "button";
       const textMode = variant === "default" ? (ganttMetrics?.textMode || "project") : "full";
       bar.className = [
         "gantt-bar",
+        `requester-category-${requesterCategory.key}`,
         variant === "bulletin" ? "bulletin-bar" : "",
         variant === "default" && textMode === "project" ? "project-only" : "",
         variant === "default" && textMode === "project-requester" ? "project-requester" : "",
         view.effectiveStatus === "checked_out" ? "is-complete" : "",
       ].filter(Boolean).join(" ");
       bar.style.cssText = ganttMetrics
-        ? `${getGanttBarStyle(stacked.reservation, { gapPx: stacked.fillsToDayEnd ? 0 : 3, visualEndTime: stacked.visualEndTime })} top: ${ganttMetrics.top + stacked.level * (ganttMetrics.barHeight + ganttMetrics.gap)}px; height: ${ganttMetrics.barHeight}px;`
-        : getStackedGanttBarStyle(stacked, { variant, compact: true });
+        ? `${getGanttBarStyle(stacked.reservation, { gapPx: stacked.fillsToDayEnd ? 0 : 3, visualEndTime: stacked.visualEndTime, range })} top: ${ganttMetrics.top + (stacked.renderLevel ?? stacked.level) * (ganttMetrics.barHeight + ganttMetrics.gap)}px; height: ${ganttMetrics.barHeight}px;`
+        : getStackedGanttBarStyle(stacked, { variant, compact: true, range });
       bar.title = view.titleText;
       bar.innerHTML = `
         <strong>${escapeHtml(view.projectName)}</strong>
@@ -695,9 +1019,16 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
       } else if (variant === "bulletin") {
         bar.innerHTML = getBulletinGanttBarMarkup(reservation);
       }
-      bar.addEventListener("click", () => openReservationDetail(reservation));
+      bar.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openReservationDetail(reservation);
+      });
       lane.appendChild(bar);
     });
+
+    if (variant === "default") {
+      lane.addEventListener("dblclick", (event) => handleMainGanttLaneDoubleClick(event, equipment, range, lane));
+    }
 
     if (laneSummary.hiddenCount > 0) {
       const overflow = document.createElement("button");
@@ -712,7 +1043,7 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
     if (reservations.length === 0) {
       const empty = document.createElement("span");
       empty.className = "gantt-empty";
-      empty.textContent = "本週沒有預約";
+      empty.textContent = "此期間沒有預約";
       lane.appendChild(empty);
     }
 
@@ -722,7 +1053,18 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant }) {
   });
 }
 
-function layoutStackedReservations(reservations) {
+function handleMainGanttLaneDoubleClick(event, equipment, range, lane) {
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest(".gantt-bar, .gantt-overflow-chip")) return;
+
+  const rect = lane.getBoundingClientRect();
+  if (!rect.width) return;
+  const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 0.999999);
+  const dayOffset = Math.floor(ratio * range.dayCount);
+  openReservationFromGanttCell(equipment, addDays(range.start, dayOffset));
+}
+
+function layoutStackedReservations(reservations, range = getWeekRange()) {
   const sorted = [...reservations].sort((a, b) => {
     const startDiff = new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
     if (startDiff !== 0) return startDiff;
@@ -745,19 +1087,19 @@ function layoutStackedReservations(reservations) {
   laidOut.forEach((item) => {
     item.stackCount = stackCount;
   });
-  applyRightEdgeFill(laidOut);
+  applyRightEdgeFill(laidOut, range);
   return laidOut;
 }
 
-function applyRightEdgeFill(stackedReservations) {
-  const weekStart = state.weekStart.getTime();
-  const weekEnd = addDays(state.weekStart, 7).getTime();
+function applyRightEdgeFill(stackedReservations, range = getWeekRange()) {
+  const rangeStart = range.start.getTime();
+  const rangeEnd = range.end.getTime();
   const groups = new Map();
 
   stackedReservations.forEach((item) => {
-    const start = Math.max(new Date(item.reservation.start_time).getTime(), weekStart);
-    const end = Math.min(new Date(item.reservation.end_time).getTime(), weekEnd);
-    const dayIndex = Math.min(Math.max(Math.floor((start - weekStart) / 86400000), 0), 6);
+    const start = Math.max(new Date(item.reservation.start_time).getTime(), rangeStart);
+    const end = Math.min(new Date(item.reservation.end_time).getTime(), rangeEnd);
+    const dayIndex = Math.min(Math.max(Math.floor((start - rangeStart) / 86400000), 0), range.dayCount - 1);
     const key = `${item.level}:${dayIndex}`;
     item.visualEndTime = end;
     item.fillsToDayEnd = false;
@@ -770,7 +1112,7 @@ function applyRightEdgeFill(stackedReservations) {
 
   groups.forEach((group) => {
     const rightMostEnd = Math.max(...group.map((entry) => entry.end));
-    const dayEnd = Math.min(weekStart + (group[0].dayIndex + 1) * 86400000, weekEnd);
+    const dayEnd = Math.min(rangeStart + (group[0].dayIndex + 1) * 86400000, rangeEnd);
     group
       .filter((entry) => entry.end === rightMostEnd)
       .forEach((entry) => {
@@ -791,7 +1133,20 @@ function isSingleDayReservation(reservation) {
 
 function getVisibleStackedReservations(stackedReservations, variant = "default") {
   const maxVisibleLevels = variant === "bulletin" ? Number.POSITIVE_INFINITY : 5;
-  return stackedReservations.filter((item) => item.level < maxVisibleLevels);
+  return stackedReservations.filter((item) => (item.renderLevel ?? item.level) < maxVisibleLevels);
+}
+
+function getReservationsIntersectingRange(reservations, range) {
+  const rangeStart = new Date(range.start).getTime();
+  const rangeEnd = new Date(range.end).getTime();
+  return reservations.filter((reservation) => {
+    const reservationStart = new Date(reservation.start_time).getTime();
+    const reservationEnd = new Date(reservation.end_time).getTime();
+    return Number.isFinite(reservationStart)
+      && Number.isFinite(reservationEnd)
+      && reservationStart < rangeEnd
+      && reservationEnd > rangeStart;
+  });
 }
 
 function getDefaultGanttMetrics(stackCount = 1) {
@@ -843,15 +1198,15 @@ function getGanttLaneSummary(stackedReservations, visibleStackedReservations) {
 }
 
 function getGanttBarStyle(reservation, options = {}) {
-  const { gapPx = 0, visualEndTime = null } = options;
-  const weekStart = state.weekStart.getTime();
-  const weekEnd = addDays(state.weekStart, 7).getTime();
+  const { gapPx = 0, visualEndTime = null, range = getWeekRange() } = options;
+  const rangeStart = range.start.getTime();
+  const rangeEnd = range.end.getTime();
   const reservationStart = new Date(reservation.start_time).getTime();
   const reservationEnd = visualEndTime ? new Date(visualEndTime).getTime() : new Date(reservation.end_time).getTime();
-  const clampedStart = Math.max(reservationStart, weekStart);
-  const clampedEnd = Math.min(reservationEnd, weekEnd);
-  const total = weekEnd - weekStart;
-  const left = ((clampedStart - weekStart) / total) * 100;
+  const clampedStart = Math.max(reservationStart, rangeStart);
+  const clampedEnd = Math.min(reservationEnd, rangeEnd);
+  const total = rangeEnd - rangeStart;
+  const left = ((clampedStart - rangeStart) / total) * 100;
   const width = Math.max(((clampedEnd - clampedStart) / total) * 100, 1.4);
   if (gapPx > 0) {
     return `left: ${left.toFixed(3)}%; width: calc(${width.toFixed(3)}% - ${gapPx}px);`;
@@ -860,8 +1215,8 @@ function getGanttBarStyle(reservation, options = {}) {
 }
 
 function getStackedGanttBarStyle(stacked, options = {}) {
-  const { variant = "default", zoom = false, compact = false } = options;
-  const baseStyle = getGanttBarStyle(stacked.reservation, { visualEndTime: stacked.visualEndTime });
+  const { variant = "default", zoom = false, compact = false, range = getWeekRange() } = options;
+  const baseStyle = getGanttBarStyle(stacked.reservation, { visualEndTime: stacked.visualEndTime, range });
   if (compact) {
     const height = variant === "bulletin" ? 20 : 16;
     const gap = variant === "bulletin" ? 4 : 3;
@@ -887,20 +1242,24 @@ function getMainGanttBarMarkup(reservation, textMode) {
   }
 
   if (textMode === "project") {
-    return `<strong>${projectName}</strong>`;
+    return `<span class="gantt-bar-info"><strong>${projectName}</strong></span>`;
   }
 
   if (textMode === "project-requester") {
     return `
-      <strong>${projectName}</strong>
-      <span>${requesterName}</span>
+      <span class="gantt-bar-info">
+        <strong>${projectName}</strong>
+        <span>${requesterName}</span>
+      </span>
     `;
   }
 
   return `
-    <strong>${projectName}</strong>
-    <span>${requesterName}</span>
-    <em>${timeRange}</em>
+    <span class="gantt-bar-info">
+      <strong>${projectName}</strong>
+      <span>${requesterName}</span>
+      <em>${timeRange}</em>
+    </span>
   `;
 }
 
@@ -984,6 +1343,7 @@ function openEquipmentSchedule(equipment) {
 }
 
 function renderEquipmentScheduleDialog(equipment) {
+  const weekRange = getWeekRange();
   const equipmentView = getEquipmentViewModel(equipment);
   const title = document.getElementById("equipmentScheduleTitle");
   const subtitle = document.getElementById("equipmentScheduleSubtitle");
@@ -996,14 +1356,14 @@ function renderEquipmentScheduleDialog(equipment) {
     Number(reservation.equipment_id) === Number(equipment.id) &&
     reservation.status !== "cancelled"
   );
-  const stackedReservations = layoutStackedReservations(reservations);
+  const stackedReservations = layoutStackedReservations(reservations, weekRange);
   title.textContent = equipmentView.name || "設備預約放大檢視";
-  subtitle.textContent = `${equipmentView.category} / ${formatDate(state.weekStart)} - ${formatDate(addDays(state.weekStart, 6))}`;
+  subtitle.textContent = `${equipmentView.category} / ${formatDate(weekRange.start)} - ${formatDate(addDays(weekRange.end, -1))}`;
   scale.innerHTML = "";
   chart.innerHTML = "";
 
-  for (let offset = 0; offset < 7; offset += 1) {
-    const date = addDays(state.weekStart, offset);
+  for (let offset = 0; offset < weekRange.dayCount; offset += 1) {
+    const date = addDays(weekRange.start, offset);
     const tick = document.createElement("div");
     tick.className = "equipment-schedule-day";
     tick.textContent = `${dayNames[date.getDay()]} ${formatDate(date)}`;
@@ -1024,7 +1384,7 @@ function renderEquipmentScheduleDialog(equipment) {
       "equipment-schedule-bar",
       view.effectiveStatus === "checked_out" ? "is-complete" : "",
     ].filter(Boolean).join(" ");
-    bar.style.cssText = getStackedGanttBarStyle(stacked, { zoom: true });
+    bar.style.cssText = getStackedGanttBarStyle(stacked, { zoom: true, range: weekRange });
     bar.title = view.titleText;
     bar.innerHTML = `
       <strong>${escapeHtml(view.projectName)}</strong>
@@ -1038,7 +1398,7 @@ function renderEquipmentScheduleDialog(equipment) {
   if (!stackedReservations.length) {
     const empty = document.createElement("span");
     empty.className = "gantt-empty";
-    empty.textContent = "本週沒有預約";
+    empty.textContent = "此期間沒有預約";
     lane.appendChild(empty);
   }
 
@@ -1281,11 +1641,18 @@ function renderReservationRows() {
 
   pageReservations.forEach((reservation) => {
     const view = getReservationViewModel(reservation);
+    const requesterCategory = getRequesterCategory(reservation);
+    const effectiveStatus = getEffectiveReservationStatus(reservation);
     const tr = document.createElement("tr");
+    tr.className = `reservation-row requester-category-${requesterCategory.key}${effectiveStatus === "checked_out" ? " is-complete" : ""}`;
     tr.innerHTML = `
       <td>${escapeHtml(view.equipmentName)}</td>
       <td>${escapeHtml(view.startText)}<br>${escapeHtml(view.endText)}</td>
-      <td>${escapeHtml(view.requesterName)}<br><span class="muted">${escapeHtml(view.department)}</span></td>
+      <td>
+        ${escapeHtml(view.requesterName)}<br>
+        <span class="muted">${escapeHtml(view.department)}</span>
+        <em class="requester-category-badge requester-category-${escapeHtml(requesterCategory.key)}">${escapeHtml(requesterCategory.label)}</em>
+      </td>
       <td>${escapeHtml(view.projectName)}<br><span class="muted">${escapeHtml(view.purpose)}</span></td>
       <td><span class="badge ${escapeHtml(view.effectiveStatus)}">${escapeHtml(view.statusLabel)}</span></td>
       <td class="row-actions"></td>
@@ -1411,6 +1778,7 @@ async function submitReservation(event) {
     setDefaultTimes();
     await loadReservations();
     renderAll();
+    closeReservationCreateDialog();
   } catch (error) {
     message.textContent = error.message;
   }
@@ -1548,11 +1916,14 @@ function renderRequesterSummary() {
     return;
   }
 
-  root.innerHTML = state.requesters.map((item) => `
-    <article class="equipment-card requester-card">
+  root.innerHTML = state.requesters.map((item) => {
+    const category = getRequesterCategory(item);
+    return `
+    <article class="equipment-card requester-card requester-category-${escapeHtml(category.key)}">
       <div>
         <h3>${escapeHtml(item.name)}</h3>
         <div class="equipment-state">
+          <span class="requester-category-badge requester-category-${escapeHtml(category.key)}">${escapeHtml(category.label)}</span>
           ${item.is_active ? "" : '<span class="badge inactive">停用</span>'}
         </div>
         <div class="equipment-card-meta">
@@ -1565,7 +1936,8 @@ function renderRequesterSummary() {
         <button type="button" class="danger-link requester-delete-btn" data-delete-requester="${item.id}">刪除</button>
       </div>
     </article>
-  `).join("");
+  `;
+  }).join("");
 
   root.querySelectorAll("[data-edit-requester]").forEach((button) => {
     button.addEventListener("click", () => startEditRequester(Number(button.dataset.editRequester)));
@@ -1798,6 +2170,11 @@ function moveWeek(days) {
   connectAndLoad();
 }
 
+function moveBulletinMonth(direction) {
+  state.bulletinMonthStart = startOfMonth(addMonths(state.bulletinMonthStart, direction));
+  renderBulletinBoard();
+}
+
 function updateBulletinScrollSettings() {
   const intervalInput = document.getElementById("bulletinScrollInterval");
   const durationInput = document.getElementById("bulletinScrollDuration");
@@ -1808,8 +2185,39 @@ function updateBulletinScrollSettings() {
   scheduleBulletinAutoScroll();
 }
 
+function getRequesterCategory(requester) {
+  const department = String(requester?.department || "").trim().toUpperCase();
+  const email = String(requester?.email || requester?.requester_email || "").trim().toLowerCase();
+  if (department === "PQE") {
+    return { key: "pqe", label: "PQE" };
+  }
+  if (email.endsWith("@senao.com")) {
+    return { key: "senao", label: "Senao 內部" };
+  }
+  return { key: "external", label: "外部" };
+}
+
+function renderReservationRequesterCategory() {
+  const form = document.getElementById("reservationForm");
+  const indicator = document.getElementById("reservationRequesterCategory");
+  if (!form || !indicator) return;
+  const category = getRequesterCategory({
+    department: form.elements.department.value,
+    email: form.elements.requester_email.value,
+  });
+  form.classList.remove("requester-category-pqe", "requester-category-senao", "requester-category-external");
+  form.classList.add(`requester-category-${category.key}`);
+  indicator.className = `requester-category-note requester-category-${category.key} wide`;
+  indicator.textContent = `使用者分類：${category.label}`;
+  indicator.hidden = false;
+}
+
 function handleBulletinViewportChange() {
+  const previousScrollTop = document.querySelector(".bulletin-wrap")?.scrollTop || 0;
+  renderBulletinBoard();
+  const wrap = document.querySelector(".bulletin-wrap");
   if (document.fullscreenElement) {
+    wrap.scrollTop = Math.min(previousScrollTop, Math.max(wrap.scrollHeight - wrap.clientHeight, 0));
     scheduleBulletinAutoScroll({ resetPosition: false });
   } else {
     stopBulletinAutoScroll();
@@ -1986,19 +2394,23 @@ function parseEquipmentCapacityLimit(value) {
   return Math.floor(parsed);
 }
 
-function setDefaultTimes() {
+function setDefaultTimes(options = {}) {
   const form = document.getElementById("reservationForm");
-  const now = new Date();
-  now.setMinutes(0, 0, 0);
-  const start = addHours(now, 1);
-  const end = addHours(start, 2);
+  if (!form) return;
+  const selectedDate = options.startDate ? startOfDay(options.startDate) : new Date();
+  const start = new Date(selectedDate);
+  start.setHours(8, 30, 0, 0);
   form.elements.department.value = "PQE";
+  if (options.equipmentId && Array.from(form.elements.equipment_id.options).some((option) => Number(option.value) === Number(options.equipmentId))) {
+    form.elements.equipment_id.value = String(options.equipmentId);
+  }
   form.elements.start_time.value = toDateTimeInput(start);
-  form.elements.end_time.value = toDateTimeInput(end);
+  form.elements.end_time.value = "";
   if (form.elements.test_condition) {
     form.elements.test_condition.value = "";
   }
   syncReservationEquipmentState();
+  renderReservationRequesterCategory();
 }
 
 function syncReservationEquipmentState() {
@@ -2049,16 +2461,20 @@ function renderRequesterLookup(field) {
   }
 
   menu.hidden = false;
-  menu.innerHTML = matches.map((item, index) => `
+  menu.innerHTML = matches.map((item, index) => {
+    const category = getRequesterCategory(item);
+    return `
     <button
       type="button"
-      class="typeahead-option"
+      class="typeahead-option requester-category-${escapeHtml(category.key)}"
       data-requester-field="${field}"
       data-requester-index="${index}">
       <strong>${escapeHtml(item.name)}</strong>
       <span>${escapeHtml(item.email)} / ${escapeHtml(item.department || "PQE")}</span>
+      <em class="requester-category-badge requester-category-${escapeHtml(category.key)}">${escapeHtml(category.label)}</em>
     </button>
-  `).join("");
+  `;
+  }).join("");
 
   menu.querySelectorAll("[data-requester-index]").forEach((button) => {
     button.addEventListener("click", () => applyRequesterSuggestion(field, Number(button.dataset.requesterIndex)));
@@ -2077,6 +2493,7 @@ function applyRequesterSuggestion(field, index) {
   state.requesterSuggestions.requester_email = [];
   renderRequesterLookup("requester_name");
   renderRequesterLookup("requester_email");
+  renderReservationRequesterCategory();
 }
 
 function syncRequesterFields(event) {
@@ -2098,6 +2515,7 @@ function syncRequesterFields(event) {
     }
     state.requesterSuggestions.requester_name = [];
     renderRequesterLookup("requester_name");
+    renderReservationRequesterCategory();
     return;
   }
 
@@ -2111,6 +2529,7 @@ function syncRequesterFields(event) {
     }
     state.requesterSuggestions.requester_email = [];
     renderRequesterLookup("requester_email");
+    renderReservationRequesterCategory();
     return;
   }
 
@@ -2126,6 +2545,7 @@ function syncRequesterFields(event) {
       departmentInput.value = match.department || "PQE";
     }
   }
+  renderReservationRequesterCategory();
 }
 
 function startOfWeek(date) {
@@ -2135,9 +2555,27 @@ function startOfWeek(date) {
   return d;
 }
 
+function startOfMonth(date) {
+  const d = startOfDay(date);
+  d.setDate(1);
+  return d;
+}
+
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 function addDays(date, days) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
+  return d;
+}
+
+function addMonths(date, months) {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
   return d;
 }
 
@@ -2150,6 +2588,11 @@ function addHours(date, hours) {
 function formatDate(date) {
   const d = new Date(date);
   return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function formatMonthLabel(date) {
+  const d = new Date(date);
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function formatTime(value) {

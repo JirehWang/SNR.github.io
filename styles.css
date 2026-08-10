@@ -167,6 +167,7 @@ button.ghost {
 
 .workspace-shell {
   padding: 14px;
+  min-width: 0;
 }
 
 .workspace-nav {
@@ -198,6 +199,7 @@ button.ghost {
 
 .workspace-view {
   display: none;
+  min-width: 0;
 }
 
 .workspace-view.active {
@@ -239,7 +241,11 @@ button.ghost {
 }
 
 .reservation-layout {
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 396px);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.reservation-layout > .side-column {
+  display: none;
 }
 
 .equipment-layout {
@@ -294,6 +300,27 @@ button.ghost {
   color: var(--muted);
   font-size: 14px;
   white-space: nowrap;
+}
+
+.date-navigation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-range-label {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: var(--brand-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.date-range-label:hover,
+.date-range-label:focus-visible {
+  background: #dbeafe;
 }
 
 .bulletin-panel {
@@ -467,6 +494,28 @@ button.ghost {
   grid-template-columns: 1fr;
 }
 
+.reservation-create-dialog {
+  width: min(780px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 10px;
+  padding: 0;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.reservation-create-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.reservation-create-dialog .reservation-panel {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.reservation-create-dialog .reservation-panel .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .typeahead {
   position: relative;
 }
@@ -518,6 +567,59 @@ button.ghost {
   font-size: 12px;
 }
 
+.requester-category-badge,
+.requester-category-note {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.requester-category-note {
+  margin: 0;
+}
+
+.requester-category-pqe.requester-card {
+  border-left-color: #2563eb;
+}
+
+.requester-category-senao.requester-card {
+  border-left-color: #16a34a;
+}
+
+.requester-category-external.requester-card {
+  border-left-color: #d97706;
+}
+
+.requester-category-pqe.requester-category-badge,
+.requester-category-pqe.requester-category-note,
+.typeahead-option.requester-category-pqe {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.requester-category-senao.requester-category-badge,
+.requester-category-senao.requester-category-note,
+.typeahead-option.requester-category-senao {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.requester-category-external.requester-category-badge,
+.requester-category-external.requester-category-note,
+.typeahead-option.requester-category-external {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.typeahead-option .requester-category-badge {
+  margin-top: 6px;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -559,6 +661,15 @@ textarea:focus {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.schedule-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .reservation-detail-actions {
@@ -660,9 +771,48 @@ textarea:focus {
   background: #fff;
 }
 
+.gantt-schedule-wrap {
+  height: min(680px, calc(100vh - 260px));
+  min-height: 420px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  cursor: default;
+  touch-action: pan-y;
+}
+
+.gantt-schedule-wrap.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.gantt-schedule-wrap .gantt-scale {
+  position: sticky;
+  top: 0;
+}
+
+.gantt-schedule-wrap .gantt-equipment-spacer,
+.gantt-schedule-wrap .gantt-equipment-label {
+  position: sticky;
+  left: 0;
+}
+
+.gantt-schedule-wrap .gantt-equipment-spacer {
+  z-index: 4;
+  background: #f8fafc;
+}
+
+.gantt-schedule-wrap .gantt-equipment-label {
+  z-index: 1;
+  box-shadow: 8px 0 12px -12px rgba(15, 23, 42, 0.65);
+}
+
 .bulletin-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   height: clamp(320px, calc(100vh - 250px), 70vh);
   min-height: 320px;
+  overflow-x: auto;
   overflow-y: auto;
   scroll-padding-top: 41px;
   scroll-snap-type: y mandatory;
@@ -775,14 +925,14 @@ textarea:focus {
   /* 右側甘特圖格子的基準高度；若 JS 有動態指定 height，會覆蓋這個值 */
   min-height: 76px;
   /* 避免重疊色塊或陰影看起來超出設備列容器 */
-  overflow: hidden;
+  overflow: visible;
   background:
     repeating-linear-gradient(
       to right,
       transparent 0,
-      transparent calc((100% / 7) - 1px),
-      #e2e8f0 calc((100% / 7) - 1px),
-      #e2e8f0 calc(100% / 7)
+      transparent calc((100% / var(--gantt-day-count, 7)) - 1px),
+      #e2e8f0 calc((100% / var(--gantt-day-count, 7)) - 1px),
+      #e2e8f0 calc(100% / var(--gantt-day-count, 7))
     );
 }
 
@@ -804,7 +954,7 @@ textarea:focus {
   height: 56px;
   /* 覆蓋全站 button min-height: 40px，避免 26px 等動態高度被強制撐高 */
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   /* 讓文字在色塊內垂直置中 */
@@ -851,6 +1001,106 @@ textarea:focus {
 .gantt-bar:focus-visible {
   outline: 3px solid #93c5fd;
   outline-offset: 2px;
+}
+
+.gantt-bar.requester-category-pqe,
+.bulletin-bar.requester-category-pqe {
+  border-color: #1d4ed8;
+  background: #2563eb;
+  color: #fff;
+}
+
+.gantt-bar.requester-category-senao,
+.bulletin-bar.requester-category-senao {
+  border-color: #15803d;
+  background: #16a34a;
+  color: #fff;
+}
+
+.gantt-bar.requester-category-external,
+.bulletin-bar.requester-category-external {
+  border-color: #b45309;
+  background: #d97706;
+  color: #fff;
+}
+
+.gantt-bar.requester-category-pqe span,
+.gantt-bar.requester-category-pqe em,
+.gantt-bar.requester-category-senao span,
+.gantt-bar.requester-category-senao em,
+.gantt-bar.requester-category-external span,
+.gantt-bar.requester-category-external em,
+.bulletin-bar.requester-category-pqe span,
+.bulletin-bar.requester-category-pqe em,
+.bulletin-bar.requester-category-senao span,
+.bulletin-bar.requester-category-senao em,
+.bulletin-bar.requester-category-external span,
+.bulletin-bar.requester-category-external em {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.gantt-bar.is-complete.requester-category-pqe,
+.gantt-bar.is-complete.requester-category-senao,
+.gantt-bar.is-complete.requester-category-external {
+  border-style: dashed;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.72), 0 4px 10px rgba(15, 23, 42, 0.16);
+  opacity: 0.82;
+}
+
+.gantt-bar.is-complete.requester-category-pqe,
+.bulletin-bar.is-complete.requester-category-pqe {
+  border-color: #93c5fd;
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+
+.gantt-bar.is-complete.requester-category-senao,
+.bulletin-bar.is-complete.requester-category-senao {
+  border-color: #86efac;
+  background: #dcfce7;
+  color: #14532d;
+}
+
+.gantt-bar.is-complete.requester-category-external,
+.bulletin-bar.is-complete.requester-category-external {
+  border-color: #fdba74;
+  background: #ffedd5;
+  color: #7c2d12;
+}
+
+.gantt-bar.is-complete.requester-category-pqe span,
+.gantt-bar.is-complete.requester-category-pqe em,
+.bulletin-bar.is-complete.requester-category-pqe span,
+.bulletin-bar.is-complete.requester-category-pqe em {
+  color: #2563eb;
+}
+
+.gantt-bar.is-complete.requester-category-senao span,
+.gantt-bar.is-complete.requester-category-senao em,
+.bulletin-bar.is-complete.requester-category-senao span,
+.bulletin-bar.is-complete.requester-category-senao em {
+  color: #15803d;
+}
+
+.gantt-bar.is-complete.requester-category-external span,
+.gantt-bar.is-complete.requester-category-external em,
+.bulletin-bar.is-complete.requester-category-external span,
+.bulletin-bar.is-complete.requester-category-external em {
+  color: #c2410c;
+}
+
+.gantt-bar-info {
+  display: block;
+  min-width: 0;
+}
+
+.gantt-schedule-wrap .gantt-bar-info {
+  position: relative;
+  z-index: 1;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  overflow: visible;
+  will-change: transform;
 }
 
 .bulletin-bar {
@@ -1232,6 +1482,39 @@ td:nth-child(6) {
   margin-bottom: 12px;
 }
 
+.reservation-row.requester-category-pqe {
+  box-shadow: inset 4px 0 0 #2563eb;
+}
+
+.reservation-row.requester-category-senao {
+  box-shadow: inset 4px 0 0 #16a34a;
+}
+
+.reservation-row.requester-category-external {
+  box-shadow: inset 4px 0 0 #d97706;
+}
+
+.reservation-row.is-complete.requester-category-pqe {
+  background: #eff6ff;
+}
+
+.reservation-row.is-complete.requester-category-senao {
+  background: #f0fdf4;
+}
+
+.reservation-row.is-complete.requester-category-external {
+  background: #fff7ed;
+}
+
+.reservation-row .requester-category-badge {
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.week-navigation {
+  display: none;
+}
+
 .reservation-list-tabs,
 .reservation-pagination {
   display: flex;
@@ -1343,6 +1626,15 @@ td:nth-child(6) {
   .reservation-edit-lock,
   .reservation-edit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .reservation-create-dialog .reservation-panel .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-controls {
+    align-items: flex-end;
+    flex-direction: column;
   }
 
   .reservation-list-toolbar {
