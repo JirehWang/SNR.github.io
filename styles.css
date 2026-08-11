@@ -1118,6 +1118,40 @@ textarea:focus {
   color: #c2410c;
 }
 
+.gantt-bar.purpose-calibration,
+.bulletin-bar.purpose-calibration,
+.equipment-schedule-bar.purpose-calibration {
+  border-color: #c2410c;
+  background: #f97316;
+  color: #fff;
+}
+
+.gantt-bar.purpose-calibration span,
+.gantt-bar.purpose-calibration em,
+.bulletin-bar.purpose-calibration span,
+.bulletin-bar.purpose-calibration em,
+.equipment-schedule-bar.purpose-calibration span,
+.equipment-schedule-bar.purpose-calibration em {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.gantt-bar.is-complete.purpose-calibration,
+.bulletin-bar.is-complete.purpose-calibration,
+.equipment-schedule-bar.is-complete.purpose-calibration {
+  border-color: #fb923c;
+  background: #fed7aa;
+  color: #9a3412;
+}
+
+.gantt-bar.is-complete.purpose-calibration span,
+.gantt-bar.is-complete.purpose-calibration em,
+.bulletin-bar.is-complete.purpose-calibration span,
+.bulletin-bar.is-complete.purpose-calibration em,
+.equipment-schedule-bar.is-complete.purpose-calibration span,
+.equipment-schedule-bar.is-complete.purpose-calibration em {
+  color: #c2410c;
+}
+
 .gantt-bar-info {
   display: block;
   min-width: 0;

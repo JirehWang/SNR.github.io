@@ -300,6 +300,17 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) {
         self.assertIn("const minimumWidth = 100 / Math.max(Number(range.dayCount) || 1, 1);", js)
         self.assertIn("const width = Math.max(((clampedEnd - clampedStart) / total) * 100, minimumWidth);", js)
 
+    def test_calibration_purpose_uses_orange_gantt_bars(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        css = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('<option value="校驗">校驗</option>', html)
+        self.assertIn('String(reservation.purpose || "").trim() === "校驗"', js)
+        self.assertIn('"purpose-calibration"', js)
+        self.assertIn(".gantt-bar.purpose-calibration", css)
+        self.assertIn(".bulletin-bar.purpose-calibration", css)
+
     def test_completed_reservations_release_time_and_render_soft_blue(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         js = (STATIC / "app.js").read_text(encoding="utf-8")

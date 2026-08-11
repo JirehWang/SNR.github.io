@@ -1003,12 +1003,16 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
       const { reservation } = stacked;
       const view = getReservationViewModel(reservation);
       const requesterCategory = getRequesterCategory(reservation);
+      const purposeClass = String(reservation.purpose || "").trim() === "校驗"
+        ? "purpose-calibration"
+        : "";
       const bar = document.createElement("button");
       bar.type = "button";
       const textMode = variant === "default" ? (ganttMetrics?.textMode || "project") : "full";
       bar.className = [
         "gantt-bar",
         `requester-category-${requesterCategory.key}`,
+        purposeClass,
         variant === "bulletin" ? "bulletin-bar" : "",
         variant === "default" && textMode === "project" ? "project-only" : "",
         variant === "default" && textMode === "project-requester" ? "project-requester" : "",
@@ -1435,11 +1439,15 @@ function renderEquipmentScheduleDialog(equipment) {
   stackedReservations.forEach((stacked) => {
     const reservation = stacked.reservation;
     const view = getReservationViewModel(reservation);
+    const purposeClass = String(reservation.purpose || "").trim() === "校驗"
+      ? "purpose-calibration"
+      : "";
     const bar = document.createElement("button");
     bar.type = "button";
     bar.className = [
       "gantt-bar",
       "equipment-schedule-bar",
+      purposeClass,
       view.effectiveStatus === "checked_out" ? "is-complete" : "",
     ].filter(Boolean).join(" ");
     bar.style.cssText = getStackedGanttBarStyle(stacked, { zoom: true, range: weekRange });

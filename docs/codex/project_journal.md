@@ -134,3 +134,7 @@
 - Changed: Replaced the fixed `1.4%` minimum bar width with a range-aware one-day minimum (`100 / dayCount`), so short and single-day reservations no longer render as several days wide when the main schedule contains hundreds of days.
 - Root cause: On a 393-day schedule, the fixed minimum rendered every short bar at about 5.5 days; for example, the 07/06–07/10 reservation and the 08/02 single-day reservation were both visibly too wide.
 - Verification: Browser measurements showed the 07/06–07/10 bar at about 95px (4.08 days) and the 08/02 single-day bar at about 24px (1 day); bulletin bars also retained one-day alignment. Focused regression test, full test suite, syntax check, and diff check passed.
+
+- Focus: Add 校驗 as a reservation purpose and identify it on Gantt charts.
+- Changed: Added 校驗 to the reservation purpose selector and applied a shared `purpose-calibration` class to reservation, bulletin, and equipment schedule bars; active bars are orange and completed bars are soft orange.
+- Verification: Browser inspection confirmed the new purpose option and computed orange colors (`rgb(249, 115, 22)`) for main and bulletin bar styles, with soft orange for completed bars; mobile viewport remained horizontally scrollable for the Gantt.
