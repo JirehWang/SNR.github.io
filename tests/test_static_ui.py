@@ -1,9 +1,25 @@
+import subprocess
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT
+
+
+def extract_js_function(source, name):
+    start = source.index(f"function {name}")
+    brace_start = source.index("{", start)
+    depth = 0
+    for index in range(brace_start, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:index + 1]
+    raise AssertionError(f"Could not extract {name}")
 
 
 class StaticUiTestCase(unittest.TestCase):
@@ -239,6 +255,41 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn(".gantt-overflow-chip", css)
         self.assertIn(".equipment-schedule-dialog", css)
         self.assertIn(".equipment-zoom-btn", css)
+
+    def test_gantt_year_header_segments_and_english_weekdays_are_present(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        css = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('const dayNames = ["Sun.", "Mon.", "Tue.", "Wed.", "Thu.", "Fri.", "Sat."]', js)
+        self.assertNotIn('const dayNames = ["週日"', js)
+        self.assertIn("function getGanttYearSegments(", js)
+        self.assertIn("function appendGanttYearHeader(", js)
+        self.assertIn("appendGanttYearHeader(scale, range, variant);", js)
+        self.assertIn('scale.style.setProperty("--gantt-year-label-left"', js)
+        self.assertIn('scale.style.setProperty("--gantt-year-label-right"', js)
+        self.assertIn('label.className = "gantt-year-label";', js)
+        self.assertIn("cell.appendChild(label);", js)
+        self.assertIn(".gantt-year-cell", css)
+        self.assertIn(".gantt-year-spacer", css)
+        self.assertIn("overflow: clip", css)
+        self.assertIn("text-align: left", css)
+        self.assertIn(".gantt-year-label", css)
+        self.assertIn("position: sticky", css)
+        self.assertIn("left: var(--gantt-year-label-left", css)
+        self.assertIn("right: var(--gantt-year-label-right", css)
+
+        helper = extract_js_function(js, "getGanttYearSegments")
+        script = helper + """
+const segments = getGanttYearSegments({ start: new Date(2026, 11, 27), dayCount: 7 });
+const actual = segments.map(({ year, span }) => ({ year, span }));
+const expected = [{ year: 2026, span: 5 }, { year: 2027, span: 2 }];
+if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+  console.error(JSON.stringify(actual));
+  process.exit(1);
+}
+"""
+        result = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
     def test_completed_reservations_release_time_and_render_soft_blue(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")

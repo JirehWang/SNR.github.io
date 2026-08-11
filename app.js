@@ -57,7 +57,7 @@ const statusText = {
 
 statusText.validation = "驗證中";
 
-const dayNames = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+const dayNames = ["Sun.", "Mon.", "Tue.", "Wed.", "Thu.", "Fri.", "Sat."];
 
 document.addEventListener("DOMContentLoaded", async () => {
   initializeReservationCreateDialog();
@@ -914,8 +914,15 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
     : 220 + range.dayCount * dayWidth;
   scale.style.gridTemplateColumns = `220px repeat(${range.dayCount}, ${dayWidth}px)`;
   scale.style.minWidth = `${minWidth}px`;
+  scale.style.setProperty("--gantt-year-label-left", "calc(220px + 8px)");
+  scale.style.setProperty("--gantt-year-label-right", "8px");
   chart.style.minWidth = `${minWidth}px`;
-  scale.innerHTML = `<div class="gantt-equipment-spacer ${variant === "bulletin" ? "bulletin-cell" : ""}">設備</div>`;
+  scale.innerHTML = "";
+  appendGanttYearHeader(scale, range, variant);
+  const equipmentSpacer = document.createElement("div");
+  equipmentSpacer.className = `gantt-equipment-spacer ${variant === "bulletin" ? "bulletin-cell" : ""}`;
+  equipmentSpacer.textContent = "設備";
+  scale.appendChild(equipmentSpacer);
   chart.innerHTML = "";
 
   for (let offset = 0; offset < range.dayCount; offset += 1) {
@@ -1342,6 +1349,43 @@ function openEquipmentSchedule(equipment) {
   dialog.showModal();
 }
 
+function getGanttYearSegments(range) {
+  const start = new Date(range.start);
+  start.setHours(0, 0, 0, 0);
+  const dayCount = Math.max(Number(range.dayCount) || 0, 0);
+  const segments = [];
+  for (let offset = 0; offset < dayCount; offset += 1) {
+    const date = new Date(start);
+    date.setDate(date.getDate() + offset);
+    const year = date.getFullYear();
+    const current = segments.at(-1);
+    if (current && current.year === year) {
+      current.span += 1;
+    } else {
+      segments.push({ year, span: 1 });
+    }
+  }
+  return segments;
+}
+
+function appendGanttYearHeader(scale, range, variant = "default") {
+  const spacer = document.createElement("div");
+  spacer.className = `gantt-equipment-spacer gantt-year-spacer ${variant === "bulletin" ? "bulletin-cell" : ""}`;
+  spacer.setAttribute("aria-hidden", "true");
+  scale.appendChild(spacer);
+
+  getGanttYearSegments(range).forEach((segment) => {
+    const cell = document.createElement("div");
+    cell.className = `gantt-year-cell${variant === "bulletin" ? " bulletin-cell" : ""}`;
+    cell.style.gridColumn = `span ${segment.span}`;
+    const label = document.createElement("span");
+    label.className = "gantt-year-label";
+    label.textContent = `${segment.year} 年`;
+    cell.appendChild(label);
+    scale.appendChild(cell);
+  });
+}
+
 function renderEquipmentScheduleDialog(equipment) {
   const weekRange = getWeekRange();
   const equipmentView = getEquipmentViewModel(equipment);
@@ -1360,7 +1404,20 @@ function renderEquipmentScheduleDialog(equipment) {
   title.textContent = equipmentView.name || "設備預約放大檢視";
   subtitle.textContent = `${equipmentView.category} / ${formatDate(weekRange.start)} - ${formatDate(addDays(weekRange.end, -1))}`;
   scale.innerHTML = "";
+  scale.style.setProperty("--gantt-year-label-left", "8px");
+  scale.style.setProperty("--gantt-year-label-right", "8px");
   chart.innerHTML = "";
+
+  getGanttYearSegments(weekRange).forEach((segment) => {
+    const cell = document.createElement("div");
+    cell.className = "gantt-year-cell equipment-schedule-year-cell";
+    cell.style.gridColumn = `span ${segment.span}`;
+    const label = document.createElement("span");
+    label.className = "gantt-year-label";
+    label.textContent = `${segment.year} 年`;
+    cell.appendChild(label);
+    scale.appendChild(cell);
+  });
 
   for (let offset = 0; offset < weekRange.dayCount; offset += 1) {
     const date = addDays(weekRange.start, offset);

@@ -876,6 +876,35 @@ textarea:focus {
   font-weight: 800;
 }
 
+.gantt-year-spacer {
+  min-height: 34px;
+  border-bottom: 1px solid var(--line);
+  background: #eef6ff;
+}
+
+.gantt-year-cell {
+  min-height: 34px;
+  overflow: clip;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 8px;
+  background: #eef6ff;
+  color: #0f172a;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.gantt-year-label {
+  position: sticky;
+  left: var(--gantt-year-label-left, 8px);
+  right: var(--gantt-year-label-right, 8px);
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  white-space: nowrap;
+}
+
 .gantt-day {
   min-height: 40px;
   border-right: 1px solid var(--line);
@@ -1328,6 +1357,10 @@ textarea:focus {
   min-width: 840px;
   border-bottom: 1px solid var(--line);
   background: #f8fafc;
+}
+
+.equipment-schedule-year-cell {
+  min-height: 34px;
 }
 
 .equipment-schedule-day {
