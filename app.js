@@ -1214,7 +1214,8 @@ function getGanttBarStyle(reservation, options = {}) {
   const clampedEnd = Math.min(reservationEnd, rangeEnd);
   const total = rangeEnd - rangeStart;
   const left = ((clampedStart - rangeStart) / total) * 100;
-  const width = Math.max(((clampedEnd - clampedStart) / total) * 100, 1.4);
+  const minimumWidth = 100 / Math.max(Number(range.dayCount) || 1, 1);
+  const width = Math.max(((clampedEnd - clampedStart) / total) * 100, minimumWidth);
   if (gapPx > 0) {
     return `left: ${left.toFixed(3)}%; width: calc(${width.toFixed(3)}% - ${gapPx}px);`;
   }

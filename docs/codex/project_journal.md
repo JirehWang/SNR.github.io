@@ -129,3 +129,8 @@
 - Changed: Removed the bulletin-only minimum-width expansion and explicitly set each Gantt scale and chart to the same calculated width (`220px + dayCount × dayWidth`).
 - Learned: `min-width` allowed the block containers to expand beyond the inline grid tracks, so lane background lines were calculated over a wider width than the date headers.
 - Verification: Browser geometry checks at desktop and mobile sizes reported zero day-to-lane width delta for both bulletin and reservation Gantts; focused regression test passed.
+
+- Focus: Correct reservation bar date spans on long Gantt ranges.
+- Changed: Replaced the fixed `1.4%` minimum bar width with a range-aware one-day minimum (`100 / dayCount`), so short and single-day reservations no longer render as several days wide when the main schedule contains hundreds of days.
+- Root cause: On a 393-day schedule, the fixed minimum rendered every short bar at about 5.5 days; for example, the 07/06–07/10 reservation and the 08/02 single-day reservation were both visibly too wide.
+- Verification: Browser measurements showed the 07/06–07/10 bar at about 95px (4.08 days) and the 08/02 single-day bar at about 24px (1 day); bulletin bars also retained one-day alignment. Focused regression test, full test suite, syntax check, and diff check passed.

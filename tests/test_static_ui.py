@@ -294,6 +294,12 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) {
         result = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
+    def test_gantt_bar_minimum_width_tracks_one_day_for_long_ranges(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("const minimumWidth = 100 / Math.max(Number(range.dayCount) || 1, 1);", js)
+        self.assertIn("const width = Math.max(((clampedEnd - clampedStart) / total) * 100, minimumWidth);", js)
+
     def test_completed_reservations_release_time_and_render_soft_blue(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         js = (STATIC / "app.js").read_text(encoding="utf-8")
