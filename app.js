@@ -909,13 +909,13 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
   const dayWidth = variant === "default"
     ? getMainScheduleDayWidth()
     : getGanttDisplayDayWidth(document.querySelector(".bulletin-wrap"));
-  const minWidth = variant === "bulletin"
-    ? Math.max(1320, 220 + range.dayCount * dayWidth)
-    : 220 + range.dayCount * dayWidth;
+  const minWidth = 220 + range.dayCount * dayWidth;
   scale.style.gridTemplateColumns = `220px repeat(${range.dayCount}, ${dayWidth}px)`;
+  scale.style.width = `${minWidth}px`;
   scale.style.minWidth = `${minWidth}px`;
   scale.style.setProperty("--gantt-year-label-left", "calc(220px + 8px)");
   scale.style.setProperty("--gantt-year-label-right", "8px");
+  chart.style.width = `${minWidth}px`;
   chart.style.minWidth = `${minWidth}px`;
   scale.innerHTML = "";
   appendGanttYearHeader(scale, range, variant);

@@ -122,3 +122,10 @@
 - Changed: Centralized the fixed display range, updated the main date label and bulletin range to 31 days, sized both Gantt column widths against the container, and re-rendered the visible board after view changes or resize.
 - Preserved: The main schedule's six-month extension buffer, month navigation, drag behavior, reservation interactions, colors, and bulletin playback logic.
 - Verification: Browser checks showed the main label as an exact 31-day window and the bulletin board rendered 31 date cells; static tests and JavaScript syntax checks passed.
+
+### 2026-08-11
+
+- Focus: Align bulletin and reservation Gantt grid lines.
+- Changed: Removed the bulletin-only minimum-width expansion and explicitly set each Gantt scale and chart to the same calculated width (`220px + dayCount × dayWidth`).
+- Learned: `min-width` allowed the block containers to expand beyond the inline grid tracks, so lane background lines were calculated over a wider width than the date headers.
+- Verification: Browser geometry checks at desktop and mobile sizes reported zero day-to-lane width delta for both bulletin and reservation Gantts; focused regression test passed.
