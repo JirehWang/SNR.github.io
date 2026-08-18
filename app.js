@@ -2815,7 +2815,7 @@ function getRequesterCategory(requester) {
     return { key: "pqe", label: "PQE" };
   }
   if (email.endsWith("@senao.com")) {
-    return { key: "senao", label: "Senao 內部" };
+    return { key: "senao", label: "神準內部" };
   }
   return { key: "external", label: "外部" };
 }
