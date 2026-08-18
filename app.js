@@ -362,11 +362,6 @@ function bindEvents() {
   document.getElementById("floorplanSaveBtn")?.addEventListener("click", saveFloorplanLayout);
   document.getElementById("floorplanSelectBtn")?.addEventListener("click", focusSelectedFloorplanDevice);
   document.getElementById("reservationFloorplanToggleBtn")?.addEventListener("click", toggleReservationFloorplanThumbnail);
-  document.getElementById("floorplanThumbnailFloatingBtn")?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    state.reservationFloorplanThumbnail = false;
-    syncReservationFloorplanThumbnail();
-  });
   document.getElementById("clearGanttFilterBtn")?.addEventListener("click", clearGanttFloorplanFilter);
   document.getElementById("ganttFilterResetBtn")?.addEventListener("click", clearGanttFloorplanFilter);
   document.getElementById("reservationFloorplanCanvas")?.addEventListener("click", (event) => {

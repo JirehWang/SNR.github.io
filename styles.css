@@ -2020,35 +2020,6 @@ td:nth-child(6) {
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.reservation-floorplan-panel.is-thumbnail .floorplan-expand-overlay-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(15, 23, 42, 0.88);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 6px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(4px);
-  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
-  white-space: nowrap;
-  margin-top: 4px;
-}
-
-.reservation-floorplan-panel.is-thumbnail .floorplan-expand-overlay-btn:hover {
-  background: var(--brand);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(31, 111, 235, 0.35);
-}
-
-.reservation-floorplan-panel:not(.is-thumbnail) .floorplan-expand-overlay-btn {
-  display: none;
-}
-
 .reservation-floorplan-panel.is-thumbnail .floorplan-device {
   font-size: 9px;
   padding: 1px 2px;
