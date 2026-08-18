@@ -1,5 +1,7 @@
 # Reliability Lab Reservation
 
+> **ONLINE 版本**：本資料夾是線上 Supabase 前端預覽，預設使用 `http://127.0.0.1:8000/?view=equipment`。本機／區網 SQLite 版本請使用 `D:\py\SNR-online-preview`。
+
 可靠度實驗室設備預約系統。正式前端是 GitHub Pages 根目錄的 Supabase 版本；`app/server.py` 是保留的本機 SQLite fallback 與 API 測試 harness。
 
 ## 快速入口

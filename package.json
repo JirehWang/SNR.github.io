@@ -1,0 +1,21 @@
+{
+  "name": "snr.github.io",
+  "version": "1.0.0",
+  "description": "部門內暫用版設備預約系統。此版本包含前端、後端 API、SQLite 資料庫與基本測試。",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "npm run test:e2e",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "supabase": "^2.109.0"
+  }
+}

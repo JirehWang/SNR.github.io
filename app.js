@@ -1,3 +1,205 @@
+
+/* --------------------------------------------------------------------------
+   Equipment Maintenance Metadata & Conflict Tracking
+   -------------------------------------------------------------------------- */
+
+const MAINTENANCE_STORAGE_KEY = "snr_equipment_maintenance_meta_v1";
+
+function getMaintenanceMetadataMap() {
+  try {
+    const raw = window.localStorage?.getItem(MAINTENANCE_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveMaintenanceMetadata(equipmentId, meta) {
+  try {
+    const map = getMaintenanceMetadataMap();
+    if (meta == null) {
+      delete map[String(equipmentId)];
+    } else {
+      map[String(equipmentId)] = meta;
+    }
+    window.localStorage?.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.warn("Save maintenance metadata failed", e);
+  }
+}
+
+function getEquipmentMaintenanceMeta(equipment) {
+  if (!equipment) return null;
+  const map = getMaintenanceMetadataMap();
+  const meta = map[String(equipment.id)] || {};
+  return {
+    started_at: equipment.maintenance_started_at || meta.started_at || equipment.updated_at || equipment.created_at || new Date().toISOString(),
+    months: Number(equipment.maintenance_months || meta.months || 1),
+  };
+}
+
+function getReservationEquipmentConflict(reservation) {
+  if (!reservation) return null;
+  if (reservation.status === "cancelled" || reservation.status === "checked_out") return null;
+
+  const equipment = state.equipment.find((e) => Number(e.id) === Number(reservation.equipment_id));
+  if (!equipment) return null;
+
+  // Case 1: Equipment is offline
+  if (equipment.status === "offline") {
+    return {
+      type: "offline",
+      reason: "設備已停用",
+      equipmentId: equipment.id,
+      equipmentName: equipment.name,
+      equipment,
+    };
+  }
+
+  // Case 2: Equipment is in maintenance
+  if (equipment.status === "maintenance") {
+    const meta = getEquipmentMaintenanceMeta(equipment);
+    const startDate = new Date(meta.started_at);
+    const endDate = new Date(startDate.getTime());
+    endDate.setMonth(endDate.getMonth() + meta.months);
+
+    const resStart = new Date(reservation.start_time).getTime();
+    const resEnd = new Date(reservation.end_time).getTime();
+
+    if (resStart < endDate.getTime() && resEnd > startDate.getTime()) {
+      return {
+        type: "maintenance",
+        reason: "設備維修中",
+        equipmentId: equipment.id,
+        equipmentName: equipment.name,
+        equipment,
+        maintenanceStartedAt: startDate,
+        maintenanceUntil: endDate,
+        months: meta.months,
+      };
+    }
+  }
+
+  return null;
+}
+
+function isMaintenanceExpired(equipment, now = new Date()) {
+  if (!equipment || equipment.status !== "maintenance") return false;
+  const meta = getEquipmentMaintenanceMeta(equipment);
+  const startDate = new Date(meta.started_at);
+  const endDate = new Date(startDate.getTime());
+  endDate.setMonth(endDate.getMonth() + meta.months);
+  return now.getTime() >= endDate.getTime();
+}
+
+function showEquipmentConflictWarningDialog(equipment, affectedReservations, mode = "offline") {
+  const dialog = document.getElementById("equipmentConflictWarningDialog");
+  if (!dialog || !affectedReservations || affectedReservations.length === 0) return;
+
+  const titleEl = document.getElementById("conflictWarningTitle");
+  const subtitleEl = document.getElementById("conflictWarningSubtitle");
+  const bannerEl = document.getElementById("conflictAlertBanner");
+  const tbodyEl = document.getElementById("conflictWarningRows");
+
+  const isMaintenance = mode.includes("maintenance");
+  const isExtended = mode === "maintenance_extended";
+
+  if (isExtended) {
+    titleEl.textContent = `🔧 設備維修延長警告：${equipment.name}`;
+    subtitleEl.textContent = "設備維修期已延長一個月，以下接下來一個月內的受影響專案將以紅色高亮標註。";
+    bannerEl.innerHTML = `⚠️ 設備 <strong>${escapeHtml(equipment.name)}</strong> 已延長維修期，在延長維修期間內共有 <strong>${affectedReservations.length}</strong> 筆尚未結案的預約專案受到影響。`;
+  } else if (isMaintenance) {
+    titleEl.textContent = `🔧 設備維修狀態警告：${equipment.name}`;
+    subtitleEl.textContent = "設備進入維修狀態，以下未來一個月內受影響的專案將以紅色高亮標註。";
+    bannerEl.innerHTML = `⚠️ 設備 <strong>${escapeHtml(equipment.name)}</strong> 目前設定為「維修中」，在未來一個月維修期內共有 <strong>${affectedReservations.length}</strong> 筆尚未結案的預約專案受到影響。`;
+  } else {
+    titleEl.textContent = `⚠️ 設備停用狀態警告：${equipment.name}`;
+    subtitleEl.textContent = "設備已轉為停用狀態，以下受影響的尚未結案專案將以紅色高亮標註。";
+    bannerEl.innerHTML = `⚠️ 設備 <strong>${escapeHtml(equipment.name)}</strong> 目前設定為「停用」，共有 <strong>${affectedReservations.length}</strong> 筆尚未結案的預約專案受到影響。`;
+  }
+
+  tbodyEl.innerHTML = affectedReservations.map((res) => {
+    const view = getReservationViewModel(res);
+    return `
+      <tr>
+        <td><strong>${escapeHtml(view.requesterName)}</strong><br><span class="muted">${escapeHtml(res.department || "PQE")}</span></td>
+        <td><strong>${escapeHtml(view.projectName)}</strong></td>
+        <td>${escapeHtml(view.timeRange)}</td>
+        <td>${escapeHtml(res.purpose || "-")}</td>
+      </tr>
+    `;
+  }).join("");
+
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  }
+}
+
+function promptMaintenanceExtensionDialog(equipment) {
+  const dialog = document.getElementById("maintenanceExtensionDialog");
+  if (!dialog) return;
+
+  const infoBox = document.getElementById("maintenanceExtensionInfoBox");
+  const meta = getEquipmentMaintenanceMeta(equipment);
+  const startDate = new Date(meta.started_at);
+  const endDate = new Date(startDate.getTime());
+  endDate.setMonth(endDate.getMonth() + meta.months);
+
+  const nextEndDate = new Date(endDate.getTime());
+  nextEndDate.setMonth(nextEndDate.getMonth() + 1);
+
+  infoBox.innerHTML = `
+    <div><strong>設備名稱：</strong>${escapeHtml(equipment.name)}</div>
+    <div><strong>目前狀態：</strong><span class="badge maintenance">維修中</span></div>
+    <div><strong>維修起算：</strong>${formatDate(startDate)}</div>
+    <div><strong>原預計截止：</strong>${formatDate(endDate)}（已滿 ${meta.months} 個月）</div>
+    <div><strong>延長後截止：</strong>${formatDate(nextEndDate)}（累計 ${meta.months + 1} 個月）</div>
+  `;
+
+  const extendBtn = document.getElementById("maintenanceExtendBtn");
+  const newExtendBtn = extendBtn.cloneNode(true);
+  extendBtn.parentNode.replaceChild(newExtendBtn, extendBtn);
+
+  newExtendBtn.addEventListener("click", () => {
+    dialog.close();
+    extendEquipmentMaintenance(equipment);
+  });
+
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  }
+}
+
+function extendEquipmentMaintenance(equipment) {
+  const meta = getEquipmentMaintenanceMeta(equipment);
+  const oldEndDate = new Date(new Date(meta.started_at).getTime());
+  oldEndDate.setMonth(oldEndDate.getMonth() + meta.months);
+
+  const newMonths = meta.months + 1;
+  const newEndDate = new Date(new Date(meta.started_at).getTime());
+  newEndDate.setMonth(newEndDate.getMonth() + newMonths);
+
+  saveMaintenanceMetadata(equipment.id, {
+    started_at: meta.started_at,
+    months: newMonths,
+  });
+
+  // Find newly affected reservations in the extension window [oldEndDate, newEndDate]
+  const newAffected = state.reservations.filter((res) => {
+    if (Number(res.equipment_id) !== Number(equipment.id)) return false;
+    if (res.status === "cancelled" || res.status === "checked_out") return false;
+    const resStart = new Date(res.start_time).getTime();
+    const resEnd = new Date(res.end_time).getTime();
+    return resStart < newEndDate.getTime() && resEnd >= oldEndDate.getTime();
+  });
+
+  renderAll();
+
+  if (newAffected.length > 0) {
+    showEquipmentConflictWarningDialog(equipment, newAffected, "maintenance_extended");
+  }
+}
+
 const SUPABASE_URL = "https://sbqqylrnjfrrqwrdiiun.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNicXF5bHJuamZycnF3cmRpaXVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5Mzg1MTEsImV4cCI6MjA5ODUxNDUxMX0.DlOsiff8VpyBNB1BrvnR8ny6b0CXwziM6ZqaHDcHz0Y";
 
@@ -6,10 +208,34 @@ const SCHEDULE_EXTENSION_MONTHS = 6;
 const GANTT_DRAG_THRESHOLD_PX = 6;
 const GANTT_DISPLAY_DAYS = 31;
 
+const FLOORPLAN_STORAGE_KEY = "snr.floorplan.placements.v1";
+const EQUIPMENT_DRAFT_ID = -1;
+const FLOORPLAN_SEED_PLACEMENTS = [
+  { equipment_id: 13, x_percent: 68.8, y_percent: 29.22, width_percent: 5.07, height_percent: 6.52, location_state: "placed" },
+  { equipment_id: 1, x_percent: 59.0, y_percent: 29.22, width_percent: 5.26, height_percent: 6.72, location_state: "placed" },
+  { equipment_id: 5, x_percent: 48.35, y_percent: 29.22, width_percent: 5.4, height_percent: 6.52, location_state: "placed" },
+  { equipment_id: 6, x_percent: 68.4, y_percent: 15.88, width_percent: 5.02, height_percent: 6.56, location_state: "placed" },
+  { equipment_id: 7, x_percent: 58.6, y_percent: 15.88, width_percent: 4.61, height_percent: 7.15, location_state: "placed" },
+  { equipment_id: 8, x_percent: 48.15, y_percent: 15.69, width_percent: 4.7, height_percent: 7.15, location_state: "placed" },
+  { equipment_id: 9, x_percent: 37.75, y_percent: 29.41, width_percent: 5.34, height_percent: 6.92, location_state: "placed" },
+  { equipment_id: 10, x_percent: 27.03, y_percent: 29.22, width_percent: 5.27, height_percent: 6.72, location_state: "placed" },
+  { equipment_id: 11, x_percent: 26.85, y_percent: 15.88, width_percent: 4.68, height_percent: 6.55, location_state: "placed" },
+  { equipment_id: 12, x_percent: 4.55, y_percent: 15.23, width_percent: 13.02, height_percent: 7.2, location_state: "placed" },
+  { equipment_id: 2, x_percent: 82.5, y_percent: 70.0, width_percent: 12.5, height_percent: 8.0, location_state: "unplaced" },
+  { equipment_id: 3, x_percent: 83.2, y_percent: 2.83, width_percent: 9.0, height_percent: 11.9, location_state: "placed" },
+  { equipment_id: 4, x_percent: 68.1, y_percent: 2.83, width_percent: 10.2, height_percent: 4.9, location_state: "placed" },
+  { equipment_id: 14, x_percent: 12.6, y_percent: 30.32, width_percent: 4.67, height_percent: 11.77, location_state: "placed" },
+  { equipment_id: 15, x_percent: 12.69, y_percent: 42.43, width_percent: 5.78, height_percent: 10.58, location_state: "placed" },
+  { equipment_id: 16, x_percent: 7.25, y_percent: 61.02, width_percent: 4.61, height_percent: 9.27, location_state: "placed" },
+  { equipment_id: 17, x_percent: 78.68, y_percent: 82.6, width_percent: 14.33, height_percent: 8.4, location_state: "placed" },
+];
+
 const state = {
   client: null,
   config: null,
   equipment: [],
+  floorplanPlacements: [],
+  savedFloorplanPlacements: [],
   reservations: [],
   requesters: [],
   weekStart: startOfWeek(new Date()),
@@ -27,8 +253,21 @@ const state = {
     pageSize: 10,
   },
   editingEquipmentId: null,
+  selectedFloorplanEquipmentId: null,
+  selectedGanttEquipmentId: null,
+  reservationFloorplanThumbnail: true,
+  floorplanLayoutEnabled: false,
+  floorplanDirty: false,
+  floorplanPointer: null,
+  floorplanStorageMode: "seed",
+  equipmentDialogOpen: false,
+  equipmentDialogSaved: false,
+  equipmentDraftEquipmentId: null,
+  equipmentDraftPlacements: [],
+  equipmentDraftPointer: null,
   editingRequesterId: null,
   equipmentFormDirty: false,
+  equipmentLabelSupported: true,
   equipmentSpecSupported: true,
   requesterFormDirty: false,
   requesterEmailAutofillValue: "",
@@ -104,6 +343,36 @@ function bindEvents() {
   document.getElementById("equipmentForm").addEventListener("input", markEquipmentFormDirty);
   document.getElementById("equipmentCancelBtn").addEventListener("click", cancelEquipmentEdit);
   document.getElementById("equipmentResetBtn").addEventListener("click", resetEquipmentForm);
+  document.getElementById("conflictWarningCloseBtn")?.addEventListener("click", () => document.getElementById("equipmentConflictWarningDialog")?.close());
+  document.getElementById("conflictWarningConfirmBtn")?.addEventListener("click", () => document.getElementById("equipmentConflictWarningDialog")?.close());
+  document.getElementById("maintenanceExtensionCloseBtn")?.addEventListener("click", () => document.getElementById("maintenanceExtensionDialog")?.close());
+  document.getElementById("maintenanceLaterBtn")?.addEventListener("click", () => document.getElementById("maintenanceExtensionDialog")?.close());
+  document.getElementById("equipmentAddBtn")?.addEventListener("click", () => startEditEquipment(null));
+  document.getElementById("equipmentDialogCloseBtn")?.addEventListener("click", cancelEquipmentEdit);
+  document.getElementById("equipmentEditorDialog")?.addEventListener("cancel", handleEquipmentDialogCancel);
+  document.getElementById("equipmentEditorDialog")?.addEventListener("close", handleEquipmentDialogClose);
+  document.getElementById("equipmentEditorDraftForm")?.addEventListener("input", handleEquipmentEditorDraftInput);
+  document.getElementById("equipmentEditorDraftSubmitBtn")?.addEventListener("click", () => {
+    document.getElementById("equipmentForm")?.requestSubmit();
+  });
+  document.getElementById("equipmentEditorDraftCancelBtn")?.addEventListener("click", cancelEquipmentEdit);
+  document.getElementById("equipmentEditorDraftResetBtn")?.addEventListener("click", resetEquipmentForm);
+  document.getElementById("floorplanLayoutBtn")?.addEventListener("click", toggleFloorplanLayoutMode);
+  document.getElementById("floorplanResetBtn")?.addEventListener("click", resetFloorplanLayout);
+  document.getElementById("floorplanSaveBtn")?.addEventListener("click", saveFloorplanLayout);
+  document.getElementById("floorplanSelectBtn")?.addEventListener("click", focusSelectedFloorplanDevice);
+  document.getElementById("reservationFloorplanToggleBtn")?.addEventListener("click", toggleReservationFloorplanThumbnail);
+  document.getElementById("floorplanThumbnailFloatingBtn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.reservationFloorplanThumbnail = false;
+    syncReservationFloorplanThumbnail();
+  });
+  document.getElementById("clearGanttFilterBtn")?.addEventListener("click", clearGanttFloorplanFilter);
+  document.getElementById("ganttFilterResetBtn")?.addEventListener("click", clearGanttFloorplanFilter);
+  document.getElementById("reservationFloorplanCanvas")?.addEventListener("click", (event) => {
+    if (event.target.closest(".floorplan-device, button, a")) return;
+    clearGanttFloorplanFilter();
+  });
 
   document.getElementById("requesterForm").addEventListener("submit", submitRequester);
   document.getElementById("requesterForm").addEventListener("input", markRequesterFormDirty);
@@ -126,6 +395,12 @@ function bindEvents() {
   document.getElementById("reservationClosedTab").addEventListener("click", () => setReservationListStatus("closed"));
   document.getElementById("reservationPrevPage").addEventListener("click", () => moveReservationListPage(-1));
   document.getElementById("reservationNextPage").addEventListener("click", () => moveReservationListPage(1));
+  document.addEventListener("pointermove", handleFloorplanPointerMove);
+  document.addEventListener("pointermove", handleEquipmentDraftPointerMove);
+  document.addEventListener("pointerup", stopFloorplanPointer);
+  document.addEventListener("pointerup", stopEquipmentDraftPointer);
+  document.addEventListener("pointercancel", stopFloorplanPointer);
+  document.addEventListener("pointercancel", stopEquipmentDraftPointer);
 }
 
 function hydrateViewFromLocation() {
@@ -206,6 +481,7 @@ async function connectAndLoad(forceRefresh = false) {
 async function loadAll() {
   await loadRequesterDirectory();
   await loadEquipment();
+  await loadFloorplanPlacements();
   await loadReservations();
 }
 
@@ -227,28 +503,148 @@ async function loadRequesterDirectory() {
 }
 
 async function loadEquipment() {
-  const equipmentSelect = "id, name, category, location, status, capacity, is_active, requires_test_condition";
-  let { data, error } = await state.client
-    .from("equipment")
-    .select("id, name, category, location, status, capacity, equipment_spec, is_active, requires_test_condition")
-    .order("is_active", { ascending: false })
-    .order("category", { ascending: true })
-    .order("name", { ascending: true });
+  const baseEquipmentFields = [
+    "id",
+    "name",
+    "category",
+    "location",
+    "status",
+    "capacity",
+    "is_active",
+    "requires_test_condition",
+  ];
+  let data = null;
+  let error = null;
+  state.equipmentLabelSupported = true;
+  state.equipmentSpecSupported = true;
 
-  if (error && /equipment_spec.*does not exist/i.test(error.message || "")) {
-    state.equipmentSpecSupported = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const selectedFields = [...baseEquipmentFields];
+    if (state.equipmentLabelSupported) selectedFields.push("label_name");
+    if (state.equipmentSpecSupported) selectedFields.push("equipment_spec");
+
     ({ data, error } = await state.client
       .from("equipment")
-      .select(equipmentSelect)
+      .select(selectedFields.join(", "))
       .order("is_active", { ascending: false })
       .order("category", { ascending: true })
       .order("name", { ascending: true }));
-  } else {
-    state.equipmentSpecSupported = !error;
+
+    if (!error) break;
+
+    if (state.equipmentLabelSupported && isMissingColumnError(error, "label_name")) {
+      state.equipmentLabelSupported = false;
+      continue;
+    }
+    if (state.equipmentSpecSupported && isMissingColumnError(error, "equipment_spec")) {
+      state.equipmentSpecSupported = false;
+      continue;
+    }
+    break;
   }
 
   assertNoError(error, "讀取設備資料失敗");
-  state.equipment = (data || []).map((item) => ({ ...item, equipment_spec: item.equipment_spec || "" }));
+  state.equipment = (data || []).map((item) => ({
+    ...item,
+    label_name: item.label_name || "",
+    equipment_spec: item.equipment_spec || "",
+  }));
+}
+
+async function loadFloorplanPlacements() {
+  if (!state.client) {
+    persistSeedFloorplanPlacements();
+    return;
+  }
+
+  try {
+    const { data, error } = await state.client
+      .from("equipment_floorplan_placements")
+      .select("equipment_id, x_percent, y_percent, width_percent, height_percent, location_state")
+      .order("equipment_id", { ascending: true });
+
+    if (error) {
+      if (isFloorplanTableUnavailable(error)) {
+        persistSeedFloorplanPlacements();
+        return;
+      }
+      throw error;
+    }
+
+    const placements = (data || []).map((item, index) => normalizeFloorplanPlacement(item, index));
+    if (placements.length) {
+      state.floorplanPlacements = placements;
+      state.savedFloorplanPlacements = clonePlacements(placements);
+      state.floorplanStorageMode = "supabase";
+      writeFloorplanPlacementsToLocalStorage(placements);
+      return;
+    }
+  } catch (error) {
+    console.warn("Floorplan placement load failed", error.message);
+  }
+
+  persistSeedFloorplanPlacements();
+}
+
+function normalizeFloorplanPlacement(item, index) {
+  const fallback = getDefaultFloorplanPlacement({ id: item?.equipment_id || index + 1 }, index);
+  return {
+    equipment_id: Number(item?.equipment_id ?? fallback.equipment_id),
+    x_percent: clampNumber(Number(item?.x_percent ?? fallback.x_percent), 0, 100 - fallback.width_percent, fallback.x_percent),
+    y_percent: clampNumber(Number(item?.y_percent ?? fallback.y_percent), 0, 100 - fallback.height_percent, fallback.y_percent),
+    width_percent: clampNumber(Number(item?.width_percent ?? fallback.width_percent), 3, 100, fallback.width_percent),
+    height_percent: clampNumber(Number(item?.height_percent ?? fallback.height_percent), 3, 100, fallback.height_percent),
+    location_state: item?.location_state || fallback.location_state,
+  };
+}
+
+function getSeedFloorplanPlacements() {
+  return FLOORPLAN_SEED_PLACEMENTS.map((item, index) => normalizeFloorplanPlacement(item, index));
+}
+
+function readFloorplanPlacementsFromLocalStorage() {
+  try {
+    const raw = window.localStorage?.getItem(FLOORPLAN_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item, index) => normalizeFloorplanPlacement(item, index));
+  } catch (error) {
+    console.warn("Floorplan localStorage parse failed", error);
+    return [];
+  }
+}
+
+function writeFloorplanPlacementsToLocalStorage(placements) {
+  try {
+    window.localStorage?.setItem(FLOORPLAN_STORAGE_KEY, JSON.stringify(placements));
+  } catch (error) {
+    console.warn("Floorplan localStorage write failed", error);
+  }
+}
+
+function persistSeedFloorplanPlacements() {
+  const localPlacements = readFloorplanPlacementsFromLocalStorage();
+  const placements = localPlacements.length ? localPlacements : getSeedFloorplanPlacements();
+  state.floorplanPlacements = clonePlacements(placements);
+  state.savedFloorplanPlacements = clonePlacements(placements);
+  state.floorplanStorageMode = localPlacements.length ? "localStorage" : "seed";
+}
+
+function hydrateFloorplanPlacementsFromFallback() {
+  persistSeedFloorplanPlacements();
+}
+
+function isFloorplanTableUnavailable(error) {
+  const message = String(error?.message || "");
+  return /equipment_floorplan_placements/i.test(message)
+    && /(does not exist|Could not find|relation .* does not exist|schema cache)/i.test(message);
+}
+
+function isMissingColumnError(error, columnName) {
+  const message = String(error?.message || "");
+  const escapedColumn = columnName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(${escapedColumn}.*(does not exist|Could not find|schema cache)|Could not find.*${escapedColumn})`, "i").test(message);
 }
 
 async function loadReservations() {
@@ -295,17 +691,27 @@ function renderAll() {
   renderRequesterOptions();
   renderRequesterSummary();
   renderEquipmentSummary();
+  renderEquipmentFloorplan();
+  renderReservationFloorplan();
+  renderDisabledEquipmentList();
   renderViewState();
   renderGantt();
   renderBulletinBoard();
   renderReservationRows();
   renderConnectionState();
   syncEquipmentForm();
+  if (state.equipmentDialogOpen) {
+    renderEquipmentEditorFloorplan();
+  }
   syncRequesterForm();
 }
 
 function markEquipmentFormDirty() {
   state.equipmentFormDirty = true;
+  if (state.equipmentDialogOpen) {
+    syncEquipmentEditorDraftForm();
+    renderEquipmentEditorFloorplan();
+  }
 }
 
 function markRequesterFormDirty() {
@@ -740,16 +1146,19 @@ function renderEquipmentOptions() {
 function getEquipmentViewModel(equipment) {
   const status = equipment.status || "offline";
   const statusLabel = statusText[status] || status;
+  const isActive = isTruthyFlag(equipment.is_active);
   return {
     id: equipment.id,
     name: equipment.name || "-",
+    labelName: equipment.label_name || "",
     category: equipment.category || "-",
     location: equipment.location || "-",
     capacity: equipment.capacity || "-",
     equipmentSpec: equipment.equipment_spec || "未設定",
     status,
     statusLabel,
-    isActive: isTruthyFlag(equipment.is_active),
+    isActive,
+    isDisabled: status === "offline" || !isActive,
     requiresTestCondition: isTruthyFlag(equipment.requires_test_condition),
     requiresTestConditionLabel: isTruthyFlag(equipment.requires_test_condition) ? "必填" : "非必填",
     labelText: `${equipment.category || "-"} / ${statusLabel}`,
@@ -796,10 +1205,44 @@ function renderEquipmentSummary() {
 }
 
 function startEditEquipment(equipmentId) {
-  state.editingEquipmentId = Number(equipmentId);
+  const dialog = document.getElementById("equipmentEditorDialog");
+  const normalizedEquipmentId = equipmentId == null ? null : Number(equipmentId);
+  const equipment = state.equipment.find((item) => Number(item.id) === normalizedEquipmentId) || null;
+
+  if (equipment && equipment.status === "maintenance" && isMaintenanceExpired(equipment)) {
+    promptMaintenanceExtensionDialog(equipment);
+    return;
+  }
+  const draftEquipmentId = equipment ? Number(equipment.id) : EQUIPMENT_DRAFT_ID;
+  const existingPlacement = equipment
+    ? getAllFloorplanPlacementsForRender().find((item) => Number(item.equipment_id) === Number(equipment.id))
+    : null;
+  const fallbackIndex = equipment
+    ? Math.max(state.equipment.findIndex((item) => Number(item.id) === Number(equipment.id)), 0)
+    : state.equipment.length;
+  const basePlacements = clonePlacements(getAllFloorplanPlacementsForRender());
+  const draftPlacement = normalizeFloorplanPlacement(
+    existingPlacement
+      ? { ...existingPlacement, equipment_id: draftEquipmentId }
+      : getDefaultFloorplanPlacement({ id: draftEquipmentId }, fallbackIndex),
+    fallbackIndex,
+  );
+
+  state.editingEquipmentId = normalizedEquipmentId;
+  state.equipmentDialogOpen = true;
+  state.equipmentDialogSaved = false;
+  state.equipmentDraftEquipmentId = draftEquipmentId;
+  state.equipmentDraftPlacements = clonePlacements([
+    ...basePlacements.filter((item) => Number(item.equipment_id) !== draftEquipmentId),
+    draftPlacement,
+  ]).sort((left, right) => Number(left.equipment_id) - Number(right.equipment_id));
+  state.equipmentDraftPointer = null;
   state.equipmentFormDirty = false;
   syncEquipmentForm();
+  renderEquipmentEditorFloorplan();
   setActiveView("equipment");
+  if (dialog?.open) return;
+  dialog?.showModal();
 }
 
 function syncEquipmentForm() {
@@ -815,50 +1258,95 @@ function syncEquipmentForm() {
 
   if (!equipment) {
     title.textContent = "新增/編輯設備資訊";
+    const draftTitle = document.getElementById("equipmentEditorDraftTitle");
+    const draftSubtitle = document.getElementById("equipmentEditorSubtitle");
+    if (draftTitle) draftTitle.textContent = "新增設備";
+    if (draftSubtitle) draftSubtitle.textContent = "填寫設備資料並完成平面圖草稿定位後送出。";
     submitButton.textContent = "新增設備";
     cancelButton.hidden = true;
     resetButton.textContent = "清空";
     form.elements.equipment_id.value = "";
     form.elements.name.value = "";
+    if (form.elements.label_name) form.elements.label_name.value = "";
     form.elements.category.value = "";
     form.elements.location.value = "";
     form.elements.capacity.value = "";
     form.elements.equipment_spec.value = "";
     form.elements.requires_test_condition.value = "0";
     form.elements.status.value = "available";
-    form.elements.is_active.value = "1";
     if (!message.dataset.preserve) {
       message.textContent = "";
     }
+    syncEquipmentEditorDraftForm();
     state.equipmentFormDirty = false;
     return;
   }
 
   title.textContent = `編輯設備資訊：${equipment.name}`;
+  const draftTitle = document.getElementById("equipmentEditorDraftTitle");
+  const draftSubtitle = document.getElementById("equipmentEditorSubtitle");
+  if (draftTitle) draftTitle.textContent = `編輯設備：${equipment.name}`;
+  if (draftSubtitle) draftSubtitle.textContent = "調整設備資料或平面圖草稿定位後送出。";
   submitButton.textContent = "儲存變更";
   cancelButton.hidden = false;
   resetButton.textContent = "回復原值";
   form.elements.equipment_id.value = String(equipment.id);
   form.elements.name.value = equipment.name;
+  if (form.elements.label_name) form.elements.label_name.value = equipment.label_name || "";
   form.elements.category.value = equipment.category;
   form.elements.location.value = equipment.location || "";
   form.elements.capacity.value = String(equipment.capacity || "");
   form.elements.equipment_spec.value = equipment.equipment_spec || "";
   form.elements.requires_test_condition.value = isTruthyFlag(equipment.requires_test_condition) ? "1" : "0";
   form.elements.status.value = equipment.status;
-  form.elements.is_active.value = equipment.is_active ? "1" : "0";
   message.textContent = "";
+  syncEquipmentEditorDraftForm();
   state.equipmentFormDirty = false;
+}
+
+function syncEquipmentEditorDraftForm() {
+  const form = document.getElementById("equipmentForm");
+  const draft = document.getElementById("equipmentEditorDraftForm");
+  if (!form || !draft) return;
+  ["equipment_id", "name", "category", "location", "capacity", "equipment_spec", "requires_test_condition", "status"]
+    .forEach((name) => {
+      const source = form.elements[name];
+      const target = draft.querySelector(`[name="${name}"]`);
+      if (source && target) target.value = source.value;
+    });
+}
+
+function handleEquipmentEditorDraftInput(event) {
+  const field = event.target;
+  if (!field || !field.name) return;
+  const name = field.name;
+  const form = document.getElementById("equipmentForm");
+  const source = form?.elements?.[name];
+  if (!source) return;
+  source.value = field.value;
+  markEquipmentFormDirty();
 }
 
 function resetEquipmentForm() {
   state.equipmentFormDirty = false;
   syncEquipmentForm();
+  if (state.equipmentDialogOpen) {
+    renderEquipmentEditorFloorplan();
+  }
 }
 
 function cancelEquipmentEdit() {
+  const dialog = document.getElementById("equipmentEditorDialog");
+  if (dialog?.open) {
+    state.equipmentDialogSaved = false;
+    dialog.close();
+    return;
+  }
   state.editingEquipmentId = null;
   state.equipmentFormDirty = false;
+  state.equipmentDraftEquipmentId = null;
+  state.equipmentDraftPlacements = [];
+  state.equipmentDraftPointer = null;
   const message = document.getElementById("equipmentMessage");
   message.dataset.preserve = "";
   message.textContent = "已取消編輯。";
@@ -866,6 +1354,7 @@ function cancelEquipmentEdit() {
 }
 
 function renderGantt(options = {}) {
+  syncGanttFloorplanFilterNotice();
   const scheduleRange = getMainScheduleRange();
   const scrollDate = options.scrollDate || state.scheduleFocusDate || scheduleRange.start;
   renderGanttSurface({
@@ -938,7 +1427,11 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
     return;
   }
 
-  state.equipment.forEach((equipment) => {
+  const visibleEquipment = state.equipment.filter((equipment) => !isEquipmentDisabled(equipment));
+  const ganttEquipment = state.selectedGanttEquipmentId == null
+    ? visibleEquipment
+    : visibleEquipment.filter((equipment) => Number(equipment.id) === Number(state.selectedGanttEquipmentId));
+  ganttEquipment.forEach((equipment) => {
     const equipmentView = getEquipmentViewModel(equipment);
     const row = document.createElement("div");
     row.className = `gantt-row${variant === "bulletin" ? " bulletin-row" : ""}`;
@@ -1016,7 +1509,7 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
         variant === "bulletin" ? "bulletin-bar" : "",
         variant === "default" && textMode === "project" ? "project-only" : "",
         variant === "default" && textMode === "project-requester" ? "project-requester" : "",
-        view.effectiveStatus === "checked_out" ? "is-complete" : "",
+        getEffectiveReservationStatus(reservation) === "checked_out" ? "is-complete" : "",
       ].filter(Boolean).join(" ");
       bar.style.cssText = ganttMetrics
         ? `${getGanttBarStyle(stacked.reservation, { gapPx: stacked.fillsToDayEnd ? 0 : 3, visualEndTime: stacked.visualEndTime, range })} top: ${ganttMetrics.top + (stacked.renderLevel ?? stacked.level) * (ganttMetrics.barHeight + ganttMetrics.gap)}px; height: ${ganttMetrics.barHeight}px;`
@@ -1287,6 +1780,9 @@ function getBulletinGanttBarMarkup(reservation) {
 function getEffectiveReservationStatus(reservation, now = new Date()) {
   if (reservation.status === "cancelled") return "cancelled";
   if (reservation.status === "checked_out") return "checked_out";
+  if (getReservationEquipmentConflict(reservation)) {
+    return reservation.status || "reserved";
+  }
   const end = new Date(reservation.end_time).getTime();
   if (Number.isFinite(end) && end <= now.getTime()) return "checked_out";
   return reservation.status || "reserved";
@@ -1448,7 +1944,7 @@ function renderEquipmentScheduleDialog(equipment) {
       "gantt-bar",
       "equipment-schedule-bar",
       purposeClass,
-      view.effectiveStatus === "checked_out" ? "is-complete" : "",
+      getEffectiveReservationStatus(reservation) === "checked_out" ? "is-complete" : "",
     ].filter(Boolean).join(" ");
     bar.style.cssText = getStackedGanttBarStyle(stacked, { zoom: true, range: weekRange });
     bar.title = view.titleText;
@@ -1709,8 +2205,18 @@ function renderReservationRows() {
     const view = getReservationViewModel(reservation);
     const requesterCategory = getRequesterCategory(reservation);
     const effectiveStatus = getEffectiveReservationStatus(reservation);
+    const conflict = getReservationEquipmentConflict(reservation);
+
+    const conflictClass = conflict ? ` is-equipment-conflict is-${conflict.type}-conflict` : "";
+    const completeClass = effectiveStatus === "checked_out" ? " is-complete" : "";
+
     const tr = document.createElement("tr");
-    tr.className = `reservation-row requester-category-${requesterCategory.key}${effectiveStatus === "checked_out" ? " is-complete" : ""}`;
+    tr.className = `reservation-row requester-category-${requesterCategory.key}${conflictClass}${completeClass}`;
+
+    const statusBadgeMarkup = conflict
+      ? `<span class="badge badge-conflict-danger" title="${escapeHtml(conflict.reason)}：不可自動結案">⚠️ ${escapeHtml(conflict.reason)}</span>`
+      : `<span class="badge ${escapeHtml(view.effectiveStatus)}">${escapeHtml(view.statusLabel)}</span>`;
+
     tr.innerHTML = `
       <td>${escapeHtml(view.equipmentName)}</td>
       <td>${escapeHtml(view.startText)}<br>${escapeHtml(view.endText)}</td>
@@ -1720,7 +2226,7 @@ function renderReservationRows() {
         <em class="requester-category-badge requester-category-${escapeHtml(requesterCategory.key)}">${escapeHtml(requesterCategory.label)}</em>
       </td>
       <td>${escapeHtml(view.projectName)}<br><span class="muted">${escapeHtml(view.purpose)}</span></td>
-      <td><span class="badge ${escapeHtml(view.effectiveStatus)}">${escapeHtml(view.statusLabel)}</span></td>
+      <td>${statusBadgeMarkup}</td>
       <td class="row-actions"></td>
     `;
 
@@ -1859,6 +2365,7 @@ async function submitEquipment(event) {
   const payload = Object.fromEntries(new FormData(form).entries());
   const equipmentId = payload.equipment_id ? Number(payload.equipment_id) : null;
 
+  const status = String(payload.status || "available");
   const row = {
     name: String(payload.name || "").trim(),
     category: String(payload.category || "").trim(),
@@ -1866,10 +2373,13 @@ async function submitEquipment(event) {
     capacity: String(payload.capacity || "").trim(),
     equipment_spec: String(payload.equipment_spec || "").trim(),
     requires_test_condition: String(payload.requires_test_condition || "0") === "1",
-    status: String(payload.status || "available"),
-    is_active: String(payload.is_active || "1") === "1",
+    status,
+    is_active: status !== "offline",
   };
 
+  if (payload.label_name !== undefined && state.equipmentLabelSupported) {
+    row.label_name = String(payload.label_name || "").trim();
+  }
   if (!state.equipmentSpecSupported) {
     delete row.equipment_spec;
   }
@@ -1883,6 +2393,7 @@ async function submitEquipment(event) {
     return;
   }
   try {
+    let savedEquipmentId = equipmentId;
     if (equipmentId) {
       const { error } = await state.client
         .from("equipment")
@@ -1890,7 +2401,6 @@ async function submitEquipment(event) {
         .eq("id", equipmentId);
       assertNoError(error, "更新設備失敗");
       message.textContent = "設備資料已更新。";
-      state.editingEquipmentId = equipmentId;
     } else {
       const { data, error } = await state.client
         .from("equipment")
@@ -1899,9 +2409,12 @@ async function submitEquipment(event) {
         .single();
       assertNoError(error, "新增設備失敗");
       message.textContent = "設備已新增。";
-      state.editingEquipmentId = Number(data.id);
+      savedEquipmentId = Number(data.id);
     }
 
+    await saveEquipmentDraftPlacement(savedEquipmentId);
+    state.editingEquipmentId = Number(savedEquipmentId);
+    state.selectedFloorplanEquipmentId = Number(savedEquipmentId);
     state.equipmentFormDirty = false;
     message.dataset.preserve = "true";
     await loadEquipment();
@@ -1910,7 +2423,51 @@ async function submitEquipment(event) {
     if (!state.equipmentSpecSupported && payload.equipment_spec) {
       message.textContent = "設備規格欄位尚未建立；請先執行 Supabase SQL，其他設備資料已更新。";
     }
+    state.equipmentDialogSaved = true;
+    document.getElementById("equipmentEditorDialog")?.close();
+    if (!state.equipmentLabelSupported && payload.label_name) {
+      message.textContent = "平面圖標籤名稱欄位尚未建立；請先執行 Supabase SQL，其他設備資料已更新。";
+    }
+
+    // Trigger Warning Dialog if status changed to offline or maintenance
+    const updatedEq = state.equipment.find((e) => Number(e.id) === Number(savedEquipmentId));
+    if (updatedEq && status === "offline") {
+      const affected = state.reservations.filter((res) =>
+        Number(res.equipment_id) === Number(updatedEq.id) &&
+        res.status !== "cancelled" &&
+        res.status !== "checked_out"
+      );
+      if (affected.length > 0) {
+        showEquipmentConflictWarningDialog(updatedEq, affected, "offline");
+      }
+    } else if (updatedEq && status === "maintenance") {
+      const existingMeta = getEquipmentMaintenanceMeta(updatedEq);
+      saveMaintenanceMetadata(updatedEq.id, {
+        started_at: existingMeta?.started_at || new Date().toISOString(),
+        months: existingMeta?.months || 1,
+      });
+      const meta = getEquipmentMaintenanceMeta(updatedEq);
+      const startDate = new Date(meta.started_at);
+      const endDate = new Date(startDate.getTime());
+      endDate.setMonth(endDate.getMonth() + meta.months);
+
+      const affected = state.reservations.filter((res) => {
+        if (Number(res.equipment_id) !== Number(updatedEq.id)) return false;
+        if (res.status === "cancelled" || res.status === "checked_out") return false;
+        const resStart = new Date(res.start_time).getTime();
+        const resEnd = new Date(res.end_time).getTime();
+        return resStart < endDate.getTime() && resEnd > startDate.getTime();
+      });
+      if (affected.length > 0) {
+        showEquipmentConflictWarningDialog(updatedEq, affected, "maintenance");
+      }
+    }
   } catch (error) {
+    if (isMissingColumnError(error, "label_name")) {
+      state.equipmentLabelSupported = false;
+      message.textContent = "平面圖標籤名稱欄位尚未建立；請先執行 Supabase SQL。";
+      return;
+    }
     message.textContent = error.message;
   }
 }
@@ -2110,6 +2667,7 @@ async function deleteRequester(requesterId) {
 
 function equipmentMatchesPayload(equipment, payload) {
   return String(equipment.name) === String(payload.name)
+    && String(equipment.label_name || "") === String(payload.label_name || "")
     && String(equipment.category) === String(payload.category)
     && String(equipment.location || "") === String(payload.location || "")
     && String(equipment.capacity || "") === String(payload.capacity || "")
@@ -2159,6 +2717,10 @@ async function cancelProject(reservation) {
   } catch (error) {
     renderNotice(error.message, "error");
   }
+}
+
+function completeReservation(reservation) {
+  return completeProject(reservation);
 }
 
 async function completeProject(reservation) {
@@ -2300,7 +2862,11 @@ function handleBulletinFullscreenChange() {
   }, 0);
 }
 
-function scheduleBulletinAutoScroll(options = {}) {
+function scheduleBulletinAutoScroll() {
+  return scheduleBulletinAutoScrollWithOptions();
+}
+
+function scheduleBulletinAutoScrollWithOptions(options = {}) {
   const resetPosition = options.resetPosition !== false;
   stopBulletinAutoScroll();
 
@@ -2694,4 +3260,698 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+/* --------------------------------------------------------------------------
+   Equipment floorplan
+   -------------------------------------------------------------------------- */
+
+function clonePlacements(placements) {
+  return (placements || []).map((item, index) => normalizeFloorplanPlacement(item, index));
+}
+
+function getDefaultFloorplanPlacement(equipment, index) {
+  const column = index % 4;
+  const row = Math.floor(index / 4);
+  return {
+    equipment_id: Number(equipment?.id || index + 1),
+    x_percent: 6 + column * 22,
+    y_percent: 8 + row * 18,
+    width_percent: 12,
+    height_percent: 8,
+    location_state: "unplaced",
+  };
+}
+
+function isEquipmentDisabled(equipment) {
+  if (!equipment) return false;
+  if (String(equipment.status || "available") === "offline") return true;
+  const activeFlag = equipment.is_active ?? equipment.isActive;
+  const hasActiveFlag = activeFlag !== undefined && activeFlag !== null && activeFlag !== "";
+  return hasActiveFlag && !isTruthyFlag(activeFlag);
+}
+
+function getAllFloorplanPlacementsForRender() {
+  const placementMap = new Map(
+    clonePlacements(state.floorplanPlacements).map((item) => [Number(item.equipment_id), item]),
+  );
+  return state.equipment.map((equipment, index) =>
+    placementMap.get(Number(equipment.id)) || getDefaultFloorplanPlacement(equipment, index),
+  );
+}
+
+function getFloorplanPlacementsForRender() {
+  return getAllFloorplanPlacementsForRender().filter((placement) => {
+    const equipment = state.equipment.find((item) => Number(item.id) === Number(placement.equipment_id));
+    return !isEquipmentDisabled(equipment);
+  });
+}
+
+function getSelectedFloorplanEquipment() {
+  return state.equipment.find((item) => Number(item.id) === Number(state.selectedFloorplanEquipmentId)) || null;
+}
+
+function getSelectedFloorplanPlacement() {
+  return getFloorplanPlacementsForRender().find(
+    (item) => Number(item.equipment_id) === Number(state.selectedFloorplanEquipmentId),
+  ) || null;
+}
+
+function canEditFloorplanLayout() {
+  return typeof isAdmin === "function" ? isAdmin() : true;
+}
+
+function setFloorplanPlacementsState(placements, mode) {
+  const normalized = clonePlacements(placements);
+  state.floorplanPlacements = normalized;
+  state.savedFloorplanPlacements = clonePlacements(normalized);
+  state.floorplanDirty = false;
+  state.floorplanStorageMode = mode;
+}
+
+function getEquipmentActiveReservation(equipmentId, targetDate = new Date()) {
+  const dayStart = startOfDay(targetDate).getTime();
+  const dayEnd = addDays(startOfDay(targetDate), 1).getTime();
+  return state.reservations.find((reservation) => {
+    if (Number(reservation.equipment_id) !== Number(equipmentId)) return false;
+    if (reservation.status === "cancelled") return false;
+    const start = new Date(reservation.start_time).getTime();
+    const end = new Date(reservation.end_time).getTime();
+    return Number.isFinite(start) && Number.isFinite(end) && start < dayEnd && end > dayStart;
+  }) || null;
+}
+
+function getFloorplanDisplayName(equipment, fallback) {
+  const labelName = String(equipment?.label_name || equipment?.labelName || "").trim();
+  return labelName || String(equipment?.name || fallback || "").trim();
+}
+
+function getFloorplanDeviceClassName(equipment, { selected = false, editing = false } = {}) {
+  const status = equipment?.status || "available";
+  const classes = ["floorplan-device", `state-${status}`];
+  if (selected) classes.push("active");
+  if (editing) classes.push("editing");
+  if (isEquipmentDisabled(equipment)) classes.push("is-disabled");
+  return classes.join(" ");
+}
+
+function syncReservationFloorplanThumbnail() {
+  const panel = document.querySelector(".reservation-floorplan-panel");
+  const toggleBtn = document.getElementById("reservationFloorplanToggleBtn");
+  if (!panel || !toggleBtn) return;
+
+  const isThumbnail = !!state.reservationFloorplanThumbnail;
+  panel.classList.toggle("is-thumbnail", isThumbnail);
+  const icon = toggleBtn.querySelector(".toggle-icon");
+  const text = toggleBtn.querySelector(".toggle-text");
+  if (isThumbnail) {
+    if (icon) icon.innerHTML = "&#x2922;";
+    if (text) text.textContent = "展開全圖";
+    toggleBtn.title = "展開全圖";
+    toggleBtn.setAttribute("aria-label", "展開全圖");
+  } else {
+    if (icon) icon.innerHTML = "&#x2921;";
+    if (text) text.textContent = "縮小為縮圖";
+    toggleBtn.title = "縮小為縮圖";
+    toggleBtn.setAttribute("aria-label", "縮小為縮圖");
+  }
+}
+
+function toggleReservationFloorplanThumbnail() {
+  state.reservationFloorplanThumbnail = !state.reservationFloorplanThumbnail;
+  syncReservationFloorplanThumbnail();
+}
+
+function syncGanttFloorplanFilterNotice() {
+  const notice = document.getElementById("ganttFilterNotice");
+  const resetButton = document.getElementById("ganttFilterResetBtn");
+  const nameNode = document.getElementById("ganttFilterEquipmentName");
+  const equipment = state.equipment.find(
+    (item) => Number(item.id) === Number(state.selectedGanttEquipmentId),
+  );
+  const isFiltered = !!equipment;
+  if (notice) notice.hidden = !isFiltered;
+  if (resetButton) resetButton.hidden = !isFiltered;
+  if (nameNode) nameNode.textContent = equipment?.name || "";
+
+  const ganttWrap = document.querySelector(".gantt-schedule-wrap");
+  if (ganttWrap) {
+    ganttWrap.classList.toggle("is-single-filtered", isFiltered);
+  }
+}
+
+function clearGanttFloorplanFilter() {
+  if (state.selectedGanttEquipmentId == null) return;
+  state.selectedGanttEquipmentId = null;
+  syncGanttFloorplanFilterNotice();
+  renderGantt();
+  renderReservationFloorplan();
+}
+
+function renderReservationFloorplan() {
+  const overlay = document.getElementById("reservationFloorplanOverlay");
+  const canvas = document.getElementById("reservationFloorplanCanvas");
+  const label = document.getElementById("reservationFloorplanDateLabel");
+  if (!overlay || !canvas) return;
+
+  syncReservationFloorplanThumbnail();
+  syncGanttFloorplanFilterNotice();
+  const today = startOfDay(new Date());
+  const todayText = `${today.getMonth() + 1}/${today.getDate()}`;
+  if (label) {
+    const selectedEquipment = state.equipment.find(
+      (item) => Number(item.id) === Number(state.selectedGanttEquipmentId),
+    );
+    const selectedText = selectedEquipment ? `【已聚焦設備：${selectedEquipment.name}】` : "";
+    label.textContent = `今日 (${todayText}) 設備使用狀況：點選設備方塊可篩選下方甘特圖，點擊空白處可解除篩選。${selectedText}`;
+  }
+
+  const selectedId = state.selectedGanttEquipmentId == null
+    ? null
+    : Number(state.selectedGanttEquipmentId);
+  overlay.innerHTML = getFloorplanPlacementsForRender().map((placement) => {
+    const equipment = state.equipment.find((item) => Number(item.id) === Number(placement.equipment_id));
+    const isSelected = selectedId != null && Number(placement.equipment_id) === selectedId;
+    const isDimmed = selectedId != null && !isSelected;
+    const labelName = getFloorplanDisplayName(equipment, `Equipment #${placement.equipment_id}`);
+    const fullName = equipment?.name || labelName;
+    const activeReservation = getEquipmentActiveReservation(placement.equipment_id, today);
+    const category = activeReservation ? getRequesterCategory(activeReservation) : null;
+    const isCalibration = activeReservation
+      && ["校正", "校驗"].includes(String(activeReservation.purpose || "").trim());
+    const classes = [
+      "floorplan-device",
+      `state-${equipment?.status || "available"}`,
+      activeReservation ? "is-booked" : "",
+      activeReservation && category ? `requester-category-${category.key}` : "",
+      isCalibration ? "purpose-calibration" : "",
+      isSelected ? "selected active" : "",
+      isDimmed ? "is-dimmed" : "",
+      isEquipmentDisabled(equipment) ? "is-disabled" : "",
+    ].filter(Boolean).join(" ");
+
+    let tooltip = `${fullName}\n狀態: ${statusText[equipment?.status] || "可預約"}`;
+    let bookingBadge = "";
+    if (activeReservation) {
+      const project = escapeHtml(activeReservation.project_name || category?.label || "預約中");
+      const requester = escapeHtml(activeReservation.requester_name || "");
+      tooltip = `${fullName}\n狀態: 【${category?.label || "預約中"}】\n專案: ${activeReservation.project_name || "未填"}\n申請人: ${requester}\n用途: ${activeReservation.purpose || "一般測試"}`;
+      bookingBadge = `<span class="floorplan-booking-badge">${project}</span>`;
+    }
+
+    return `
+      <button type="button" class="${escapeHtml(classes)}" data-equipment-id="${escapeHtml(placement.equipment_id)}"
+        style="left:${escapeHtml(placement.x_percent)}%;top:${escapeHtml(placement.y_percent)}%;width:${escapeHtml(placement.width_percent)}%;height:${escapeHtml(placement.height_percent)}%;"
+        aria-pressed="${escapeHtml(isSelected)}" title="${escapeHtml(tooltip)}">
+        <span class="state-dot" aria-hidden="true"></span>
+        <span class="floorplan-device-label">${escapeHtml(labelName)}</span>
+        ${bookingBadge}
+      </button>
+    `;
+  }).join("");
+
+  overlay.querySelectorAll("[data-equipment-id]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const equipmentId = Number(button.dataset.equipmentId);
+      state.selectedGanttEquipmentId = state.selectedGanttEquipmentId === equipmentId ? null : equipmentId;
+      syncGanttFloorplanFilterNotice();
+      renderGantt();
+      renderReservationFloorplan();
+    });
+  });
+}
+
+function renderEquipmentFloorplan() {
+  const overlay = document.getElementById("floorplanOverlay");
+  const list = document.getElementById("floorplanDeviceList");
+  const details = document.getElementById("floorplanSelectionDetails");
+  const meta = document.getElementById("floorplanSelectionMeta");
+  const message = document.getElementById("floorplanMessage");
+  const layoutButton = document.getElementById("floorplanLayoutBtn");
+  const saveButton = document.getElementById("floorplanSaveBtn");
+  const resetButton = document.getElementById("floorplanResetBtn");
+  const selectButton = document.getElementById("floorplanSelectBtn");
+  if (!overlay || !list || !details || !meta || !layoutButton || !saveButton || !resetButton || !selectButton) return;
+
+  const placements = getFloorplanPlacementsForRender();
+  const canEditLayout = canEditFloorplanLayout();
+  if (!getSelectedFloorplanEquipment() && state.equipment.length) {
+    state.selectedFloorplanEquipmentId = Number(state.equipment[0].id);
+  }
+  const selectedEquipment = getSelectedFloorplanEquipment();
+  const selectedPlacement = getSelectedFloorplanPlacement();
+  layoutButton.hidden = !canEditLayout;
+  saveButton.hidden = !canEditLayout;
+  resetButton.hidden = !canEditLayout;
+  layoutButton.setAttribute("aria-pressed", String(state.floorplanLayoutEnabled));
+  layoutButton.textContent = state.floorplanLayoutEnabled ? "結束調整" : "調整位置";
+  saveButton.disabled = !canEditLayout || !state.floorplanDirty;
+  resetButton.disabled = !canEditLayout || (!state.floorplanDirty && state.savedFloorplanPlacements.length === 0);
+  selectButton.hidden = true;
+  selectButton.disabled = !selectedEquipment;
+
+  if (message && !message.dataset.persistent) {
+    const storageText = state.floorplanStorageMode === "supabase"
+      ? "Supabase"
+      : state.floorplanStorageMode === "localStorage"
+        ? "localStorage"
+        : "seed";
+    message.textContent = state.floorplanDirty
+      ? "尚有未儲存的定位變更。"
+      : `目前定位來源: ${storageText}`;
+  }
+
+  overlay.innerHTML = placements.map((placement) => {
+    const equipment = state.equipment.find((item) => Number(item.id) === Number(placement.equipment_id));
+    const selected = Number(placement.equipment_id) === Number(state.selectedFloorplanEquipmentId);
+    const labelName = getFloorplanDisplayName(equipment, `Equipment #${placement.equipment_id}`);
+    const fullName = equipment?.name || labelName;
+    const handles = canEditLayout && state.floorplanLayoutEnabled && selected
+      ? ["nw", "ne", "sw", "se"].map((direction) => `<span class="floorplan-resize-handle" data-resize="${direction}"></span>`).join("")
+      : "";
+    return `
+      <button type="button" class="${escapeHtml(getFloorplanDeviceClassName(equipment, { selected }))}"
+        data-equipment-id="${escapeHtml(placement.equipment_id)}" data-location-state="${escapeHtml(placement.location_state)}"
+        style="left:${escapeHtml(placement.x_percent)}%;top:${escapeHtml(placement.y_percent)}%;width:${escapeHtml(placement.width_percent)}%;height:${escapeHtml(placement.height_percent)}%;"
+        aria-pressed="${escapeHtml(selected)}" aria-label="${escapeHtml(`${labelName} / ${fullName}`)}" title="${escapeHtml(fullName)}">
+        <span class="state-dot" aria-hidden="true"></span>
+        <span class="floorplan-device-label">${escapeHtml(labelName)}</span>
+        ${handles}
+      </button>
+    `;
+  }).join("");
+
+  overlay.querySelectorAll("[data-equipment-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedFloorplanEquipmentId = Number(button.dataset.equipmentId);
+      if (state.floorplanLayoutEnabled) {
+        renderEquipmentFloorplan();
+        return;
+      }
+      startEditEquipment(Number(button.dataset.equipmentId));
+    });
+    button.addEventListener("pointerdown", startFloorplanPointer);
+  });
+  list.innerHTML = "";
+
+  if (!selectedEquipment || !selectedPlacement) {
+    meta.textContent = state.floorplanLayoutEnabled ? "調整位置模式已啟用。" : "點擊平面圖設備方塊即可直接開啟編輯視窗。";
+    details.innerHTML = `
+      <article class="floorplan-detail-row"><span>目前模式</span><strong>${escapeHtml(state.floorplanLayoutEnabled ? "調整位置" : "編輯設備")}</strong></article>
+      <article class="floorplan-detail-row"><span>操作說明</span><strong>${escapeHtml(state.floorplanLayoutEnabled ? "拖曳或縮放方塊後，使用上方按鈕儲存定位。" : "設備資料與位置請在彈窗內調整。")}</strong></article>
+    `;
+    return;
+  }
+
+  meta.textContent = state.floorplanLayoutEnabled
+    ? `${selectedEquipment.name} (${selectedEquipment.category || "-"})`
+    : "點擊平面圖設備方塊即可直接開啟編輯視窗。";
+  details.innerHTML = state.floorplanLayoutEnabled
+    ? [
+      ["設備", selectedEquipment.name || "-"],
+      ["位置", selectedEquipment.location || "-"],
+      ["座標", `${selectedPlacement.x_percent.toFixed(2)}%, ${selectedPlacement.y_percent.toFixed(2)}%`],
+      ["尺寸", `${selectedPlacement.width_percent.toFixed(2)}% × ${selectedPlacement.height_percent.toFixed(2)}%`],
+    ].map(([label, value]) => `<article class="floorplan-detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("")
+    : `
+      <article class="floorplan-detail-row"><span>目前模式</span><strong>編輯設備</strong></article>
+      <article class="floorplan-detail-row"><span>可調整內容</span><strong>狀態、停用、規格、測試條件與定位</strong></article>
+    `;
+}
+
+function renderDisabledEquipmentList() {
+  const section = document.getElementById("disabledEquipmentSection");
+  const root = document.getElementById("disabledEquipmentList");
+  const count = document.getElementById("disabledEquipmentCount");
+  if (!section || !root) return;
+
+  const disabledEquipment = state.equipment.filter((item) => isEquipmentDisabled(item));
+  section.hidden = disabledEquipment.length === 0;
+  if (count) count.textContent = disabledEquipment.length ? `${disabledEquipment.length} 台` : "";
+  if (!disabledEquipment.length) {
+    root.innerHTML = "";
+    return;
+  }
+  root.innerHTML = disabledEquipment.map((item) => {
+    const view = getEquipmentViewModel(item);
+    const labelName = getFloorplanDisplayName(item, view.name);
+    return `
+      <article class="disabled-equipment-row">
+        <div class="disabled-equipment-copy"><strong>${escapeHtml(view.name)}</strong><span>${escapeHtml(labelName)} · ${escapeHtml(view.category)} · ${escapeHtml(view.statusLabel)}</span></div>
+        <button type="button" class="secondary" data-edit-disabled-equipment="${escapeHtml(view.id)}">編輯</button>
+      </article>
+    `;
+  }).join("");
+  root.querySelectorAll("[data-edit-disabled-equipment]").forEach((button) => {
+    button.addEventListener("click", () => startEditEquipment(Number(button.dataset.editDisabledEquipment)));
+  });
+}
+
+function toggleFloorplanLayoutMode() {
+  if (!canEditFloorplanLayout()) return;
+  state.floorplanLayoutEnabled = !state.floorplanLayoutEnabled;
+  renderEquipmentFloorplan();
+}
+
+function focusSelectedFloorplanDevice() {
+  const selected = document.querySelector(`#floorplanOverlay [data-equipment-id="${state.selectedFloorplanEquipmentId}"]`);
+  selected?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  selected?.focus();
+}
+
+function resetFloorplanLayout() {
+  state.floorplanPlacements = clonePlacements(state.savedFloorplanPlacements);
+  state.floorplanDirty = false;
+  const message = document.getElementById("floorplanMessage");
+  if (message) {
+    message.dataset.persistent = "";
+    message.textContent = "";
+  }
+  renderEquipmentFloorplan();
+}
+
+function findFloorplanPlacementIndex(equipmentId) {
+  return state.floorplanPlacements.findIndex((item) => Number(item.equipment_id) === Number(equipmentId));
+}
+
+function upsertFloorplanPlacement(nextPlacement) {
+  const normalized = normalizeFloorplanPlacement(nextPlacement, findFloorplanPlacementIndex(nextPlacement.equipment_id));
+  const index = findFloorplanPlacementIndex(normalized.equipment_id);
+  if (index >= 0) {
+    state.floorplanPlacements[index] = { ...state.floorplanPlacements[index], ...normalized };
+  } else {
+    state.floorplanPlacements.push(normalized);
+  }
+}
+
+function startFloorplanPointer(event) {
+  if (!canEditFloorplanLayout() || !state.floorplanLayoutEnabled) return;
+  const device = event.currentTarget;
+  const canvas = document.getElementById("floorplanCanvas");
+  const equipmentId = Number(device.dataset.equipmentId);
+  const placement = getFloorplanPlacementsForRender().find((item) => Number(item.equipment_id) === equipmentId);
+  if (!placement || !canvas) return;
+  const resizeDirection = event.target?.dataset?.resize || "";
+  state.selectedFloorplanEquipmentId = equipmentId;
+  state.floorplanPointer = {
+    equipmentId,
+    mode: resizeDirection ? "resize" : "drag",
+    direction: resizeDirection,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    bounds: canvas.getBoundingClientRect(),
+    placement: { ...placement },
+  };
+  event.preventDefault();
+  renderEquipmentFloorplan();
+}
+
+function handleFloorplanPointerMove(event) {
+  const pointer = state.floorplanPointer;
+  if (!pointer || pointer.pointerId !== event.pointerId) return;
+  const dxPercent = ((event.clientX - pointer.startX) / pointer.bounds.width) * 100;
+  const dyPercent = ((event.clientY - pointer.startY) / pointer.bounds.height) * 100;
+  const next = { ...pointer.placement };
+  if (pointer.mode === "drag") {
+    next.x_percent = clampNumber(pointer.placement.x_percent + dxPercent, 0, 100 - pointer.placement.width_percent, pointer.placement.x_percent);
+    next.y_percent = clampNumber(pointer.placement.y_percent + dyPercent, 0, 100 - pointer.placement.height_percent, pointer.placement.y_percent);
+  } else {
+    applyFloorplanResize(next, pointer.direction, dxPercent, dyPercent);
+  }
+  next.location_state = "placed";
+  upsertFloorplanPlacement(next);
+  state.floorplanDirty = true;
+  const message = document.getElementById("floorplanMessage");
+  if (message) {
+    message.dataset.persistent = "true";
+    message.textContent = "尚有未儲存的定位變更。";
+  }
+  renderEquipmentFloorplan();
+}
+
+function applyFloorplanResize(placement, direction, dxPercent, dyPercent) {
+  const minSize = 3;
+  if (direction.includes("e")) placement.width_percent = clampNumber(placement.width_percent + dxPercent, minSize, 100 - placement.x_percent, placement.width_percent);
+  if (direction.includes("s")) placement.height_percent = clampNumber(placement.height_percent + dyPercent, minSize, 100 - placement.y_percent, placement.height_percent);
+  if (direction.includes("w")) {
+    const nextX = clampNumber(placement.x_percent + dxPercent, 0, placement.x_percent + placement.width_percent - minSize, placement.x_percent);
+    placement.width_percent += placement.x_percent - nextX;
+    placement.x_percent = nextX;
+  }
+  if (direction.includes("n")) {
+    const nextY = clampNumber(placement.y_percent + dyPercent, 0, placement.y_percent + placement.height_percent - minSize, placement.y_percent);
+    placement.height_percent += placement.y_percent - nextY;
+    placement.y_percent = nextY;
+  }
+}
+
+function stopFloorplanPointer(event) {
+  if (!state.floorplanPointer || state.floorplanPointer.pointerId !== event.pointerId) return;
+  state.floorplanPointer = null;
+}
+
+async function saveFloorplanLayout() {
+  if (!canEditFloorplanLayout()) return;
+  const message = document.getElementById("floorplanMessage");
+  const visiblePlacements = getFloorplanPlacementsForRender().map((item, index) => normalizeFloorplanPlacement({
+    equipment_id: Number(item.equipment_id),
+    x_percent: Number(item.x_percent.toFixed(2)),
+    y_percent: Number(item.y_percent.toFixed(2)),
+    width_percent: Number(item.width_percent.toFixed(2)),
+    height_percent: Number(item.height_percent.toFixed(2)),
+    location_state: item.location_state || "placed",
+  }, index));
+  const disabledIds = new Set(
+    state.equipment.filter((item) => isEquipmentDisabled(item)).map((item) => Number(item.id)),
+  );
+  const preservedDisabledPlacements = clonePlacements(state.floorplanPlacements)
+    .filter((item) => disabledIds.has(Number(item.equipment_id)));
+  const placements = clonePlacements([...visiblePlacements, ...preservedDisabledPlacements])
+    .sort((left, right) => Number(left.equipment_id) - Number(right.equipment_id));
+
+  const persistLocal = (text) => {
+    writeFloorplanPlacementsToLocalStorage(placements);
+    setFloorplanPlacementsState(placements, "localStorage");
+    if (message) {
+      message.dataset.persistent = "true";
+      message.textContent = text;
+    }
+    renderEquipmentFloorplan();
+  };
+  if (!state.client) {
+    persistLocal(`已儲存 ${placements.length} 筆設備定位到 localStorage。`);
+    return;
+  }
+  try {
+    const { data, error } = await state.client
+      .from("equipment_floorplan_placements")
+      .upsert(placements, { onConflict: "equipment_id" })
+      .select("equipment_id, x_percent, y_percent, width_percent, height_percent, location_state")
+      .order("equipment_id", { ascending: true });
+    if (error) throw error;
+    const saved = (data || placements).map((item, index) => normalizeFloorplanPlacement(item, index));
+    writeFloorplanPlacementsToLocalStorage(saved);
+    setFloorplanPlacementsState(saved, "supabase");
+    if (message) {
+      message.dataset.persistent = "true";
+      message.textContent = `已儲存 ${saved.length} 筆設備定位。`;
+    }
+    renderEquipmentFloorplan();
+  } catch (error) {
+    console.warn("Floorplan save failed, falling back to localStorage", error);
+    persistLocal(`Supabase 儲存失敗，已改存 localStorage: ${error.message}`);
+  }
+}
+
+function getEquipmentDraftPlacement() {
+  const draftEquipmentId = Number(state.equipmentDraftEquipmentId);
+  if (!Number.isFinite(draftEquipmentId)) return null;
+  const placements = state.equipmentDraftPlacements.length
+    ? state.equipmentDraftPlacements
+    : getAllFloorplanPlacementsForRender();
+  const existing = placements.find((item) => Number(item.equipment_id) === draftEquipmentId);
+  if (existing) return normalizeFloorplanPlacement(existing, findFloorplanPlacementIndex(draftEquipmentId));
+  const equipment = state.equipment.find((item) => Number(item.id) === Number(state.editingEquipmentId)) || { id: draftEquipmentId };
+  const index = state.editingEquipmentId == null
+    ? state.equipment.length
+    : state.equipment.findIndex((item) => Number(item.id) === Number(state.editingEquipmentId));
+  return getDefaultFloorplanPlacement(equipment, Math.max(index, 0));
+}
+
+function getEquipmentEditorDraftViewModel() {
+  const form = document.getElementById("equipmentForm");
+  const equipment = state.equipment.find((item) => Number(item.id) === Number(state.editingEquipmentId));
+  const name = String(form?.elements?.name?.value || equipment?.name || "").trim();
+  const labelName = String(form?.elements?.label_name?.value || equipment?.label_name || "").trim();
+  const status = String(form?.elements?.status?.value || equipment?.status || "available");
+  return {
+    id: state.equipmentDraftEquipmentId,
+    name: name || "New equipment",
+    label_name: labelName,
+    status,
+    isActive: equipment ? isTruthyFlag(equipment.is_active) : true,
+  };
+}
+
+function upsertEquipmentDraftPlacement(nextPlacement) {
+  const normalized = normalizeFloorplanPlacement({
+    ...nextPlacement,
+    equipment_id: Number(state.equipmentDraftEquipmentId),
+  }, 0);
+  const retained = state.equipmentDraftPlacements.filter((item) => Number(item.equipment_id) !== Number(normalized.equipment_id));
+  state.equipmentDraftPlacements = clonePlacements([...retained, normalized])
+    .sort((left, right) => Number(left.equipment_id) - Number(right.equipment_id));
+}
+
+function getEquipmentEditorFloorplanPlacements() {
+  const draftEquipmentId = Number(state.equipmentDraftEquipmentId);
+  const draftPlacement = getEquipmentDraftPlacement();
+  const basePlacements = state.equipmentDraftPlacements.length
+    ? clonePlacements(state.equipmentDraftPlacements)
+    : clonePlacements(getAllFloorplanPlacementsForRender());
+  if (!draftPlacement || !Number.isFinite(draftEquipmentId)) return basePlacements;
+  const withoutDraft = basePlacements.filter((item) => Number(item.equipment_id) !== draftEquipmentId);
+  return clonePlacements([...withoutDraft, { ...draftPlacement, equipment_id: draftEquipmentId }])
+    .sort((left, right) => Number(left.equipment_id) - Number(right.equipment_id));
+}
+
+function renderEquipmentEditorFloorplan() {
+  const overlay = document.getElementById("equipmentDialogFloorplanOverlay");
+  const meta = document.getElementById("equipmentDialogPlacementMeta");
+  if (!overlay || !meta) return;
+  const equipment = getEquipmentEditorDraftViewModel();
+  const placement = getEquipmentDraftPlacement();
+  const allPlacements = getEquipmentEditorFloorplanPlacements();
+  const placements = allPlacements.filter((item) => {
+    const isSelected = Number(item.equipment_id) === Number(state.equipmentDraftEquipmentId);
+    const referenceEquipment = isSelected
+      ? equipment
+      : state.equipment.find((candidate) => Number(candidate.id) === Number(item.equipment_id));
+    return !isEquipmentDisabled(referenceEquipment);
+  });
+  if (!state.equipmentDialogOpen || !equipment || !placement) {
+    overlay.innerHTML = "";
+    meta.textContent = "尚未選取設備草稿定位。";
+    return;
+  }
+  overlay.innerHTML = placements.map((item) => {
+    const isSelected = Number(item.equipment_id) === Number(state.equipmentDraftEquipmentId);
+    const referenceEquipment = isSelected
+      ? equipment
+      : state.equipment.find((candidate) => Number(candidate.id) === Number(item.equipment_id)) || { id: item.equipment_id };
+    const labelName = getFloorplanDisplayName(referenceEquipment, `Equipment #${item.equipment_id}`);
+    const fullName = referenceEquipment.name || labelName;
+    const handles = isSelected
+      ? ["nw", "ne", "sw", "se"].map((direction) => `<span class="floorplan-resize-handle" data-resize="${direction}"></span>`).join("")
+      : "";
+    return `
+      <button type="button" class="${escapeHtml(`${getFloorplanDeviceClassName(referenceEquipment, { selected: isSelected, editing: isSelected })}${isSelected ? "" : " is-locked"}`)}"
+        data-equipment-id="${escapeHtml(item.equipment_id)}" data-location-state="${escapeHtml(item.location_state)}" data-editable="${escapeHtml(String(isSelected))}"
+        style="left:${escapeHtml(item.x_percent)}%;top:${escapeHtml(item.y_percent)}%;width:${escapeHtml(item.width_percent)}%;height:${escapeHtml(item.height_percent)}%;"
+        aria-pressed="${escapeHtml(String(isSelected))}" aria-disabled="${escapeHtml(String(!isSelected))}"
+        aria-label="${escapeHtml(`${labelName} / ${fullName}`)}" title="${escapeHtml(fullName)}" tabindex="${escapeHtml(isSelected ? "0" : "-1")}">
+        <span class="state-dot" aria-hidden="true"></span><span class="floorplan-device-label">${escapeHtml(labelName)}</span>${handles}
+      </button>
+    `;
+  }).join("");
+  meta.textContent = isEquipmentDisabled(equipment)
+    ? `${equipment.name || "-"} 目前為停用，不顯示於平面圖；恢復狀態後會沿用此定位。`
+    : `${equipment.name || "-"}: ${placement.x_percent.toFixed(2)}%, ${placement.y_percent.toFixed(2)}% / ${placement.width_percent.toFixed(2)}% × ${placement.height_percent.toFixed(2)}%`;
+  overlay.querySelector('[data-editable="true"]')?.addEventListener("pointerdown", startEquipmentDraftPointer);
+}
+
+function startEquipmentDraftPointer(event) {
+  if (!state.equipmentDialogOpen || event.currentTarget?.dataset?.editable !== "true") return;
+  const canvas = document.getElementById("equipmentDialogFloorplanCanvas");
+  const placement = getEquipmentDraftPlacement();
+  if (!canvas || !placement) return;
+  const resizeDirection = event.target?.dataset?.resize || "";
+  state.equipmentDraftPointer = {
+    mode: resizeDirection ? "resize" : "drag",
+    direction: resizeDirection,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    bounds: canvas.getBoundingClientRect(),
+    placement: { ...placement },
+  };
+  event.preventDefault();
+}
+
+function handleEquipmentDraftPointerMove(event) {
+  const pointer = state.equipmentDraftPointer;
+  if (!pointer || pointer.pointerId !== event.pointerId) return;
+  const dxPercent = ((event.clientX - pointer.startX) / pointer.bounds.width) * 100;
+  const dyPercent = ((event.clientY - pointer.startY) / pointer.bounds.height) * 100;
+  const next = { ...pointer.placement };
+  if (pointer.mode === "drag") {
+    next.x_percent = clampNumber(pointer.placement.x_percent + dxPercent, 0, 100 - pointer.placement.width_percent, pointer.placement.x_percent);
+    next.y_percent = clampNumber(pointer.placement.y_percent + dyPercent, 0, 100 - pointer.placement.height_percent, pointer.placement.y_percent);
+  } else {
+    applyFloorplanResize(next, pointer.direction, dxPercent, dyPercent);
+  }
+  next.location_state = "placed";
+  upsertEquipmentDraftPlacement(next);
+  renderEquipmentEditorFloorplan();
+}
+
+function stopEquipmentDraftPointer(event) {
+  if (!state.equipmentDraftPointer || state.equipmentDraftPointer.pointerId !== event.pointerId) return;
+  state.equipmentDraftPointer = null;
+}
+
+function handleEquipmentDialogCancel(event) {
+  event.preventDefault();
+  cancelEquipmentEdit();
+}
+
+function handleEquipmentDialogClose() {
+  state.equipmentDialogOpen = false;
+  state.equipmentDialogSaved = false;
+  state.editingEquipmentId = null;
+  state.equipmentFormDirty = false;
+  state.equipmentDraftEquipmentId = null;
+  state.equipmentDraftPlacements = [];
+  state.equipmentDraftPointer = null;
+}
+
+async function saveEquipmentDraftPlacement(savedEquipmentId) {
+  const draftPlacement = getEquipmentDraftPlacement();
+  if (!draftPlacement || !savedEquipmentId) return;
+  const committedPlacement = normalizeFloorplanPlacement({
+    ...draftPlacement,
+    equipment_id: Number(savedEquipmentId),
+    location_state: draftPlacement.location_state || "placed",
+  }, findFloorplanPlacementIndex(savedEquipmentId));
+  const mergedPlacements = clonePlacements([
+    ...state.floorplanPlacements.filter((item) => Number(item.equipment_id) !== Number(savedEquipmentId)),
+    committedPlacement,
+  ]).sort((left, right) => Number(left.equipment_id) - Number(right.equipment_id));
+  const persistLocal = () => {
+    writeFloorplanPlacementsToLocalStorage(mergedPlacements);
+    setFloorplanPlacementsState(mergedPlacements, "localStorage");
+  };
+  if (!state.client) {
+    persistLocal();
+    return;
+  }
+  try {
+    const { data, error } = await state.client
+      .from("equipment_floorplan_placements")
+      .upsert([committedPlacement], { onConflict: "equipment_id" })
+      .select("equipment_id, x_percent, y_percent, width_percent, height_percent, location_state");
+    if (error) throw error;
+    const savedPlacement = normalizeFloorplanPlacement((data && data[0]) || committedPlacement, findFloorplanPlacementIndex(savedEquipmentId));
+    const savedPlacements = clonePlacements([
+      ...state.floorplanPlacements.filter((item) => Number(item.equipment_id) !== Number(savedEquipmentId)),
+      savedPlacement,
+    ]).sort((left, right) => Number(left.equipment_id) - Number(right.equipment_id));
+    writeFloorplanPlacementsToLocalStorage(savedPlacements);
+    setFloorplanPlacementsState(savedPlacements, "supabase");
+  } catch (error) {
+    console.warn("Equipment dialog placement save failed, falling back to localStorage", error);
+    persistLocal();
+  }
 }

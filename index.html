@@ -45,6 +45,39 @@
       <div class="workspace-view active" data-view="reservation">
         <div class="split-layout reservation-layout">
           <div class="main-column">
+            <section class="panel section-panel reservation-floorplan-panel is-thumbnail" aria-label="實驗室設備即時平面圖">
+              <div class="section-title with-controls">
+                <div>
+                  <h2>實驗室設備即時平面圖</h2>
+                  <p id="reservationFloorplanDateLabel">今日設備使用狀況：點選設備方塊可篩選下方甘特圖，點擊空白處可解除篩選。</p>
+                </div>
+                <div class="floorplan-controls-row">
+                  <div class="floorplan-status-legend">
+                    <span class="legend-item"><span class="state-dot state-available"></span> 空閒可預約</span>
+                    <span class="legend-item"><span class="state-dot state-validation"></span> 驗證中</span>
+                    <span class="legend-item"><span class="state-dot state-maintenance"></span> 維修中</span>
+                    <span class="legend-item"><span class="state-dot requester-category-pqe"></span> PQE 預約</span>
+                    <span class="legend-item"><span class="state-dot requester-category-senao"></span> 神腦預約</span>
+                    <span class="legend-item"><span class="state-dot requester-category-external"></span> 外部預約</span>
+                    <span class="legend-item"><span class="state-dot purpose-calibration"></span> 校正中</span>
+                  </div>
+                  <button type="button" id="reservationFloorplanToggleBtn" class="secondary icon-btn-text" title="展開全圖" aria-label="展開全圖">
+                    <span class="toggle-icon">&#x2922;</span>
+                    <span class="toggle-text">展開全圖</span>
+                  </button>
+                </div>
+              </div>
+              <div class="floorplan-canvas-panel">
+                <div id="reservationFloorplanCanvas" class="floorplan-canvas">
+                  <img src="./assets/floorplan/equipment-floorplan-ui-transparent-clean.png" alt="預約設備平面圖">
+                  <div id="reservationFloorplanOverlay" class="floorplan-overlay" aria-live="polite"></div>
+                  <button type="button" id="floorplanThumbnailFloatingBtn" class="floorplan-expand-overlay-btn" title="點擊展開全圖" aria-label="點擊展開全圖">
+                    <span>&#x2922; 展開全圖</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
             <section class="panel section-panel gantt-panel" aria-label="設備使用狀況">
               <div class="section-title with-controls">
                 <div>
@@ -57,8 +90,13 @@
                     <button type="button" id="scheduleRangeLabel" class="date-range-label" aria-live="polite"></button>
                     <button type="button" id="scheduleNextMonth" class="icon-btn" title="下一個月" aria-label="下一個月">&#8250;</button>
                   </div>
+                  <button type="button" id="ganttFilterResetBtn" class="ghost" hidden>顯示全部設備</button>
                   <button type="button" id="openReservationCreateDialogBtn" class="secondary">新增預約</button>
                 </div>
+              </div>
+              <div id="ganttFilterNotice" class="gantt-filter-notice" hidden>
+                <span>已篩選設備：<strong id="ganttFilterEquipmentName"></strong></span>
+                <button type="button" id="clearGanttFilterBtn" class="link-btn">清除篩選（顯示全部）</button>
               </div>
               <div class="gantt-wrap gantt-schedule-wrap">
                 <div id="ganttScale" class="gantt-scale"></div>
@@ -180,21 +218,69 @@
 
       <div class="workspace-view" data-view="equipment">
         <div class="split-layout equipment-layout">
-          <section class="panel section-panel summary-panel" aria-label="設備清單">
-            <div class="section-title">
+          <section class="panel section-panel summary-panel" aria-label="設備平面圖與停用設備">
+            <div class="section-title legacy-equipment-summary-title" hidden aria-hidden="true">
               <div>
                 <h2>設備清單</h2>
                 <p>可編輯設備名稱、位置、容量、狀態與是否啟用。</p>
               </div>
             </div>
-            <div id="equipmentSummary" class="summary-grid"></div>
+            <div id="equipmentSummary" class="summary-grid" hidden aria-hidden="true"></div>
+            <section class="floorplan-panel" aria-label="設備平面圖">
+              <div class="section-title with-controls">
+                <div>
+                  <h3>設備平面圖</h3>
+                  <p>平面圖會優先讀取 Supabase 定位資料；若資料表尚未建立，會自動改用本機儲存與預設定位。</p>
+                </div>
+                <div class="floorplan-toolbar">
+                  <button type="button" id="equipmentAddBtn">新增設備</button>
+                  <button type="button" id="floorplanLayoutBtn" class="secondary">調整位置</button>
+                  <button type="button" id="floorplanResetBtn" class="ghost">重設</button>
+                  <button type="button" id="floorplanSaveBtn">儲存定位</button>
+                </div>
+              </div>
+              <div class="floorplan-grid">
+                <div class="floorplan-canvas-panel">
+                  <div id="floorplanCanvas" class="floorplan-canvas expanded-floorplan-canvas">
+                    <img src="./assets/floorplan/equipment-floorplan-ui-transparent-clean.png" alt="設備平面圖">
+                    <div id="floorplanOverlay" class="floorplan-overlay" aria-live="polite"></div>
+                  </div>
+                </div>
+                <aside class="floorplan-inspector floorplan-runtime-state" hidden aria-hidden="true">
+                  <div class="floorplan-selection-card">
+                    <div class="section-title">
+                      <div>
+                        <h3>平面圖操作</h3>
+                        <p id="floorplanSelectionMeta">點擊平面圖設備方塊即可直接開啟編輯視窗。</p>
+                      </div>
+                      <button type="button" id="floorplanSelectBtn" class="ghost" hidden>定位到設備</button>
+                    </div>
+                    <div id="floorplanSelectionDetails" class="summary-grid"></div>
+                    <div id="floorplanMessage" role="status"></div>
+                  </div>
+                  <div class="floorplan-device-list" hidden aria-hidden="true">
+                    <h3>設備清單</h3>
+                    <div id="floorplanDeviceList" class="summary-grid"></div>
+                  </div>
+                </aside>
+              </div>
+            </section>
+            <section id="disabledEquipmentSection" class="disabled-equipment-section" aria-label="停用設備" hidden>
+              <div class="section-title with-controls">
+                <div>
+                  <h3>停用設備</h3>
+                  <p>停用設備不會顯示在平面圖；恢復狀態後會沿用原本定位。</p>
+                </div>
+                <span id="disabledEquipmentCount" class="disabled-equipment-count"></span>
+              </div>
+              <div id="disabledEquipmentList" class="disabled-equipment-list"></div>
+            </section>
           </section>
-
-          <aside class="panel section-panel admin-panel" aria-label="新增與編輯設備">
+          <aside class="panel section-panel admin-panel equipment-inline-editor" aria-label="新增與編輯設備" hidden>
             <div class="section-title">
               <div>
                 <h2 id="equipmentFormTitle">新增/編輯設備資訊</h2>
-                <p>支援新增設備，也可修改既有設備資料。</p>
+                <p>可編輯設備名稱、位置、容量與狀態。</p>
               </div>
             </div>
             <form id="equipmentForm" class="form-grid compact">
@@ -233,13 +319,6 @@
                   <option value="validation">驗證中</option>
                   <option value="maintenance">維修中</option>
                   <option value="offline">停用</option>
-                </select>
-              </label>
-              <label>
-                是否啟用
-                <select name="is_active">
-                  <option value="1">啟用</option>
-                  <option value="0">停用</option>
                 </select>
               </label>
               <div class="form-actions wide">
@@ -398,7 +477,86 @@
     </form>
   </dialog>
 
+  <dialog id="equipmentEditorDialog" class="equipment-editor-dialog">
+    <div class="equipment-editor-shell">
+      <div class="dialog-header">
+        <div>
+          <h2 id="equipmentEditorDraftTitle">設備平面圖草稿定位</h2>
+          <p id="equipmentEditorSubtitle">在送出前，表單與平面圖定位都只會保存在草稿中。</p>
+        </div>
+        <button type="button" id="equipmentDialogCloseBtn" class="ghost">關閉</button>
+      </div>
+      <div class="equipment-editor-grid">
+        <div id="equipmentEditorDraftForm" class="form-grid compact">
+          <input type="hidden" name="equipment_id">
+          <label>
+            設備名稱
+            <input name="name" required placeholder="例如：Drop Tester">
+          </label>
+          <label>
+            類別
+            <input name="category" required placeholder="例如：DROP / ESD / TEMP">
+          </label>
+          <label>
+            位置
+            <input name="location" placeholder="例如：1F A 區">
+          </label>
+          <label>
+            可重疊預約量
+            <input name="capacity" type="text" placeholder="例如：2 / 2槽 / 4 channels">
+          </label>
+          <label>
+            設備規格
+            <textarea name="equipment_spec" rows="3" placeholder="例如：最大試片重量、尺寸、電壓或操作限制"></textarea>
+          </label>
+          <label>
+            預約需填測試條件
+            <select name="requires_test_condition">
+              <option value="0">否</option>
+              <option value="1">是</option>
+            </select>
+          </label>
+          <label>
+            狀態
+            <select name="status">
+              <option value="available">可預約</option>
+              <option value="validation">驗證中</option>
+              <option value="maintenance">維修中</option>
+              <option value="offline">停用</option>
+            </select>
+          </label>
+          <div class="form-actions wide">
+            <button type="button" id="equipmentEditorDraftSubmitBtn" class="secondary">送出設備表單</button>
+            <button type="button" id="equipmentEditorDraftCancelBtn" class="ghost">關閉</button>
+            <button type="button" id="equipmentEditorDraftResetBtn" class="ghost">重設定位草稿</button>
+            <span id="equipmentEditorDraftMessage" role="status"></span>
+          </div>
+        </div>
+        <section class="equipment-editor-map" aria-label="設備草稿定位">
+          <div class="section-title">
+            <div>
+              <h3>草稿定位</h3>
+              <p>拖曳或調整角落控制點；按下送出才會寫回主平面圖。</p>
+            </div>
+          </div>
+          <div id="equipmentDialogFloorplanCanvas" class="floorplan-canvas compact-floorplan-canvas">
+            <img src="./assets/floorplan/equipment-floorplan-ui-transparent-clean.png" alt="設備草稿平面圖">
+            <div id="equipmentDialogFloorplanOverlay" class="floorplan-overlay" aria-live="polite"></div>
+          </div>
+          <div id="equipmentDialogPlacementMeta" class="floorplan-dialog-meta" role="status"></div>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="equipmentScheduleDialog" class="equipment-schedule-dialog">
+    <form method="dialog" class="equipment-schedule-shell">
+      <div class="dialog-header">
+        <div>
+          <h2 id="equipmentScheduleTitle">設備預約放大檢視</h2>
+          <p id="equipmentScheduleSubtitle"></p>
+        </div>
+        <button type="submit" class="ghost">關閉</button>
     <form method="dialog" class="equipment-schedule-shell">
       <div class="dialog-header">
         <div>
@@ -413,6 +571,60 @@
       </div>
       <div id="equipmentScheduleList" class="equipment-schedule-list"></div>
     </form>
+  </dialog>
+
+  <dialog id="equipmentConflictWarningDialog" class="conflict-warning-dialog" aria-labelledby="conflictWarningTitle">
+    <div class="conflict-warning-shell">
+      <div class="dialog-header conflict-header">
+        <div>
+          <h2 id="conflictWarningTitle">⚠️ 設備狀態變更警告</h2>
+          <p id="conflictWarningSubtitle">以下受影響專案將以紅色高亮標註於預約清單中，且不可自動結案。</p>
+        </div>
+        <button type="button" id="conflictWarningCloseBtn" class="ghost" aria-label="關閉警告">關閉</button>
+      </div>
+      <div class="conflict-content">
+        <div class="conflict-alert-banner" id="conflictAlertBanner"></div>
+        <div class="table-wrap conflict-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>申請人 / 部門</th>
+                <th>專案名稱</th>
+                <th>預約時間區間</th>
+                <th>使用目的</th>
+              </tr>
+            </thead>
+            <tbody id="conflictWarningRows"></tbody>
+          </table>
+        </div>
+        <div class="conflict-guidance">
+          <p>📌 <strong>重要提示：</strong>為避免實驗排程衝突，請儘速與申請人聯繫進行「<strong>修改預約轉移設備</strong>」或「<strong>取消預約</strong>」。在專案從該設備移除前，該專案將持續以紅色警示呈現，且即便預約時間結束亦不會自動轉入結案狀態。</p>
+        </div>
+      </div>
+      <div class="form-actions right-align">
+        <button type="button" id="conflictWarningConfirmBtn" class="secondary">我知道了</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="maintenanceExtensionDialog" class="maintenance-extension-dialog" aria-labelledby="maintenanceExtensionTitle">
+    <div class="maintenance-extension-shell">
+      <div class="dialog-header">
+        <div>
+          <h2 id="maintenanceExtensionTitle">🔧 設備維修期滿確認</h2>
+          <p id="maintenanceExtensionSubtitle">維修狀態已持續滿一個月，尚未恢復為「驗證中」或「可預約」。</p>
+        </div>
+        <button type="button" id="maintenanceExtensionCloseBtn" class="ghost" aria-label="關閉">關閉</button>
+      </div>
+      <div class="maintenance-extension-content">
+        <div class="maintenance-info-box" id="maintenanceExtensionInfoBox"></div>
+        <p class="maintenance-prompt-text">請問是否要將維修期<strong>手動延長一個月</strong>？<br><span class="muted">延長後將自動檢查接下來一個月內之預約專案並進行警示標註。</span></p>
+      </div>
+      <div class="form-actions maintenance-extension-actions">
+        <button type="button" id="maintenanceExtendBtn" class="secondary">延長維修一個月</button>
+        <button type="button" id="maintenanceLaterBtn" class="ghost">稍後再說</button>
+      </div>
+    </div>
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

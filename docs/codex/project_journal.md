@@ -5,86 +5,83 @@
 - Project: Reliability Lab Reservation
 - Root: `D:\py\SNR.github.io`
 - Contract: `project_contract.yml`
-- Current focus: Keep the GitHub Pages Supabase frontend maintainable and stabilize the bulletin auto-scroll.
-- Last updated: 2026-07-30
+- Current focus: Complete the Supabase-to-local SQLite cutover and prepare an offline Windows deployment.
+- Last updated: 2026-07-20
 
 ## Stable Facts
 
-- Hosted frontend entry is `index.html` at the repository root.
-- Local fallback starts with `python -m app.server`.
-- SQLite data is stored beneath `data/`.
+- Local frontend entry is `index.html` at the repository root and must be served by `app.server`.
+- Production starts with `scripts/start-local.ps1` or `scripts/start-lan.ps1`.
+- Production SQLite data is `data/rlab_reservation.db` and is excluded from Git.
 - Run `scripts/verify.ps1` for the project checks.
-- Read `docs/HANDOFF.md` before changing Supabase schema or deployment settings.
+- Read `docs/HANDOFF.md` before changing local schema, API, packaging, or deployment settings.
 
 ## Open Risks
 
-- Supabase permission policy changes remain intentionally out of scope.
+- Local login/role authorization remains intentionally out of scope; deployment must stay on a controlled internal network.
 
 ## Recent Entries
 
-### 2026-08-10
+### 2026-08-14
 
-- Focus: Restructure the hosted reservation workflow around a month-at-a-glance schedule.
-- Changed: Moved the reservation form into a modal; made the main schedule show the calendar month starting today with a sticky date header and independently scrollable vertical/horizontal schedule area; clicking an available blank cell now preselects its equipment and date at 08:30 while leaving the end time blank. Added requester categories with PQE priority, Senao-internal and external color treatments in both requester management and the reservation form/typeahead.
-- Verification: Focused static regression test, full `scripts/verify.ps1` suite (21 tests), JavaScript syntax and diff checks passed. Browser checks verified desktop and mobile modal layout, the one-month range, sticky/overflowing schedule dimensions, blank-cell prefill (Drop Tester / 2026-08-11 08:30 / empty end time), and requester category rendering.
-- Deployment: Changes remain uncommitted and unpushed in the dedicated cloud-version worktree at `D:\py\SNR.github.io-cloud-feature`, as requested.
+- Focus: Equipment label source sync and prototype-local placement export.
+- Changed: Added `prototypes/sync_equipment_labels.py` plus the generated `prototypes/equipment-labels-source.json` snapshot from `data/rlab_reservation.db`, rewired `prototypes/equipment-floorplan-ux.html` to the clean transparent PNG and all 16 SQLite-backed equipment records with stable IDs (`ch01..ch10`, `esd`, `drop`, `vibration`, `ess-a`, `ess-b`, `salt`), and added localStorage persistence plus `#exportPlacements` JSON download for local-only floorplan layout work.
+- Verification: `python -m unittest tests.test_equipment_labels_sync`; `python -m unittest tests.test_floorplan_ui_transparent`; `python prototypes\sync_equipment_labels.py`; `npx playwright test tests/e2e/equipment-floorplan-ux.spec.js`
 
-- Follow-up: Reworked the main schedule into a one-month viewport backed by a six-month buffer on each side; horizontal dragging and month buttons update the focused month, and reaching either buffer edge extends it by another six months. Equipment labels and a representative reservation summary remain frozen while the schedule moves. Applied the same requester-category colors to main/bulletin reservation bars and paginated reservation rows; bulletin month navigation now advances one month at a time.
-- Follow-up verification: Browser checks confirmed initial 8/10-9/9 alignment, horizontal scroll, right-edge buffer extension, sticky equipment/reservation summaries, month-button movement, mobile no-page-overflow, bulletin horizontal containment, and category background colors.
+- Focus: Local production floorplan integration.
+- Changed: Added the persisted `equipment_floorplan_placements` SQLite table plus authenticated GET/admin PUT API in `app/server.py`, wired the real equipment workspace in `index.html`/`app.js`/`styles.css` to render the production floorplan asset with selection, drag/resize layout mode, and save/reset controls, added `scripts/import_floorplan_placements.py` plus `scripts/prepare_e2e_db.py`, and covered the flow with API/static/import/E2E tests.
+- Verification: `python -m py_compile app/server.py scripts/import_floorplan_placements.py scripts/prepare_e2e_db.py tests/test_api.py tests/test_static_ui.py tests/test_floorplan_import.py`; `node --check app.js`; `python -m unittest tests.test_api tests.test_static_ui tests.test_floorplan_import`; `npm run test:e2e -- tests/e2e/equipment-floorplan.spec.js`; `python scripts/import_floorplan_placements.py --db data/rlab_reservation.db --input C:\Users\105221\Downloads\equipment-floorplan-placements.json --backup-dir backups`
 
-- Follow-up: Moved the frozen reservation summary out of the equipment-name column and into the Gantt lane, where it stays pinned to the lane's left edge during horizontal dragging. Main Gantt row sizing now recalculates from overlaps inside the currently focused month; overlapping reservations use the stacked compact layout, while months without visible overlap return to the original single-row height. Month buttons and cross-month horizontal scrolling both trigger the same recalculation.
-- Follow-up verification: Static regression suite (23 tests), JavaScript syntax check, and diff check passed. Browser checks confirmed no frozen summary under equipment labels, lane-pinned summary position before/after horizontal scroll, 90px stacked rows for the July overlap window, and return to 76px rows for the non-overlap August window.
+- Focus: Transparent floorplan clean PNG deliverable.
+- Changed: Added `prototypes/process_ui_floorplan_transparent_clean.py` to read the existing transparent PNG, drop isolated short alpha components, strip semi-transparent fringe, and emit `prototypes/equipment-floorplan-ui-transparent-clean.png` without changing the HTML prototype.
+- Verification: `python prototypes\process_ui_floorplan_transparent_clean.py`; `python -m unittest tests.test_floorplan_ui_transparent_clean`
 
-- Follow-up: Replaced the separate lane reservation summary with the original `.gantt-bar-info` content. During horizontal scrolling, the existing bar text is translated to the visible Gantt left edge while its bar intersects the viewport, then released when the bar leaves; the text is also bounded by the Gantt right edge. Added resize synchronization so the behavior follows viewport changes.
-- Follow-up verification: Red-green focused static checks, browser coordinate checks, and screenshot review confirmed zero duplicate frozen-summary nodes, bar text pinned at the Gantt left edge, release after the bar exits, and no text beyond the Gantt right boundary.
+- Focus: Equipment floorplan prototype label placement acceptance.
+- Changed: Updated `prototypes/equipment-floorplan-ux.html` to add inspector `#generateLabel` plus `#locationStatus`, track per-device `locationState` (`unplaced`/`placing`/`placed`), enter placement mode from label generation while preserving selection, expose `data-location-state` on device buttons, and mark devices `placed` after drag or resize pointer release without regressing existing select/add/deactivate/layout interactions.
+- Verification: `npx playwright test tests/e2e/equipment-floorplan-ux.spec.js`
 
-- Follow-up: Applied light same-hue completed styling for PQE, Senao-internal, and external reservations across Gantt bars, bulletin bars, and completed reservation-list rows. Kept the category identity while making the checked-out state visually distinct. Refactored the main blank-lane click into an explicit handler so clicking an empty Gantt cell continues to open the booking dialog with equipment and 08:30 start prefilled and end time blank.
-- Follow-up verification: Focused red-green checks, full 23-test verification, browser color assertions, closed-list row checks, screenshot review, and blank-cell booking interaction passed.
+- Focus: Minimal professional floorplan deliverable.
+- Changed: Replaced `prototypes/process_professional_floorplan.py` with a direct copy of `process_polished_contour.py` logic while keeping the professional output name, regenerated `prototypes/equipment-floorplan-professional.png`, and relaxed the professional scrub-zone dark-fragment threshold to match preserved doorway linework.
+- Verification: `python prototypes\process_professional_floorplan.py`; `python tests\test_floorplan_professional.py`
 
-### 2026-07-30
+### 2026-08-11
 
-- Focus: Expand reservation history and organize the project list.
-- Changed: Loaded all reservations for the list, split it into 未結案 and 已結案 tabs, added ten-project pagination, and kept the gantt/dashboard data scoped to the selected week; moved project status actions to the right side of the detail action bar.
-- Verification: Browser checks confirmed 10 rows per page, page navigation, closed-project filtering, right-aligned status actions, and equal 40px action-button heights.
-- Next: Push the hosted frontend update and confirm the Pages asset update.
+- Focus: Add local authentication, session cookies, and role-based authorization to the SQLite deployment.
+- Changed: Added `user_accounts` plus `user_sessions`, seeded fixed admin and guest accounts, protected data APIs behind authenticated sessions, enforced reservation ownership rules by role, added a login-first frontend shell, and added admin-only role management plus auth coverage in API/static/E2E tests.
+- Learned: The legacy `app.js` in the workspace was syntactically broken, so the auth rollout required replacing it with a clean local-API implementation instead of incremental patching.
+- Verification: Pending full final command set for this auth packet.
+- Next: Review final verification output and confirm manager/member flows in browser evidence.
 
-- Focus: Polish the reservation project action buttons.
-- Changed: Kept save/copy as secondary buttons, made 專案完成 a success-colored action, kept 專案取消 in the danger style, and normalized the action-row button heights and separation.
-- Verification: Browser computed-style check confirmed all three action buttons share a 40px height and render with the intended colors.
-- Next: Push the hosted frontend polish and confirm the Pages asset update.
+### 2026-07-29
 
-- Focus: Route reservation status operations through the project detail interface.
-- Changed: Replaced reservation-list completion/cancellation actions with one 編輯 button; renamed the detail actions to 專案完成 and 專案取消, added completion confirmation, required a cancellation reason, and made completed/cancelled reservations read-only.
-- Verification: Static UI regression checks, 19 project tests, JavaScript syntax check, and diff check passed; browser visual verification is next.
-- Next: Push the hosted frontend fix and confirm the Pages asset update.
+- Focus: Improve requester add/edit form convenience.
+- Changed: Typing a requester name now suggests the account portion before parentheses plus `@senao.com` (for example, `Andys.Huang(黃健勝)` becomes `Andys.Huang@senao.com`); manually edited Email values remain unchanged when the name changes.
+- Verification: `scripts/verify.ps1` passed 24 Python tests, JavaScript syntax checks, and 2 Chromium E2E tests.
+- Next: None for this change.
 
-- Focus: Calculate dashboard reservation hours within the displayed week.
-- Changed: Clipped each active reservation to `state.weekStart` through seven days later before summing hours; cancellation flow review found one reason prompt and no second confirmation dialog.
-- Verification: Regression checks for weekly clipping and the single cancellation reason prompt, 19 project tests, JavaScript syntax check, and diff check passed.
-- Next: Push the hosted frontend fix and confirm the Pages asset update.
+### 2026-07-20 (local cutover)
 
-- Focus: Set the bulletin playback defaults requested by the user.
-- Changed: Kept the scroll interval default at 30 seconds and changed the scroll animation duration default to 1 second in both HTML and JavaScript fallbacks.
-- Verification: Red-green static UI regression check, 19 project tests, JavaScript syntax check, and diff check passed.
-- Next: Push the hosted frontend fix and confirm the Pages asset update.
+- Focus: Remove runtime Supabase dependency and preserve current hosted data locally.
+- Changed: Exported four Supabase tables to JSON and SQLite, switched the frontend to same-origin local APIs, added local requester/schema support, and included the DB in the secure transfer package.
+- Learned: First synchronized baseline is 16 equipment, 8 reservations, 11 history rows, and 7 requesters; foreign-key check has zero errors.
+- Verification: 24 Python/static/package tests and 1 Chromium local-API E2E passed before final documentation/package verification.
+- Next: On cutover day, stop writes to the old hosted site, perform one final sync, then disable or make the old site read-only.
 
-- Focus: Make the bulletin scroll duration setting control the actual animation.
-- Changed: Replaced browser-defined smooth scrolling with a `requestAnimationFrame` animation driven by `durationSeconds`; overlapping animation frames are cancelled when playback stops or settings change.
-- Learned: The old duration value only controlled when `scrollBehavior` was cleared, while the browser chose the actual smooth-scroll duration.
-- Verification: Focused static regression check and JavaScript syntax check passed; browser playback was exercised with a 10-second interval as requested.
-- Next: Monitor the GitHub Pages rollout after pushing the hosted frontend fix.
+### 2026-07-20
 
-- Focus: Correct the sticky-header offset in bulletin row snapping.
-- Changed: Added a measured sticky-header offset to the scroll snap padding and bottom target calculation so every landing row starts immediately below the date header.
-- Learned: The date header is 41 CSS pixels in the current layout; without `scroll-padding-top`, mandatory snapping moved the first row to `scrollTop=41` and hid its first 41 pixels.
-- Verification: Red-green static regression check, 19 project tests, JavaScript syntax check, and browser checks at 1920×1080 and 1366×768 passed; the top reached `scrollTop=0` and subsequent rows landed at a zero-pixel offset below the sticky header.
-- Next: Monitor the GitHub Pages rollout after pushing the hosted frontend fix.
+- Focus: Target-computer transfer readiness.
+- Changed: Added a white-list ZIP package, Windows preflight/start scripts, automatic LAN IPv4 detection, and a local deployment guide.
+- Learned: Moving the web files to one computer does not move production data; the current frontend still requires jsDelivr and Supabase connectivity.
+- Verification: Default `scripts/package.ps1` passed 22 Python tests and 1 Chromium E2E, including automatic/manual LAN IP URL generation and transfer-package contents.
+- Next: Confirm the target computer name/IP, operating owner, firewall scope, and Supabase backup owner before the actual move.
 
-- Focus: Repair bulletin board auto-scroll on the hosted frontend.
-- Changed: Constrained `.bulletin-wrap` to a viewport-based height, limited auto-scroll to fullscreen playback, aligned page transitions to bulletin rows, stopped/reset scrolling on fullscreen exit, and added static regression assertions.
-- Learned: The prior `min-height` let the bulletin container grow to its full content height (`scrollHeight === clientHeight`), so the scheduler returned without starting its interval.
-- Verification: Browser probe confirmed stable normal view, row-aligned fullscreen transitions, and no scrolling after fullscreen exit; full project verification is pending.
-- Next: Run the full verification pass and push the hosted frontend fix.
+### 2026-07-17
+
+- Focus: Repeatable browser E2E baseline.
+- Changed: Added Playwright Test configuration, an isolated local-server smoke test, and an E2E command to `scripts/verify.ps1`.
+- Learned: The hosted root frontend connects directly to Supabase, so the baseline E2E blocks Supabase traffic and uses the local SQLite server only.
+- Verification: `powershell -ExecutionPolicy Bypass -File .\\scripts\\verify.ps1` passed: 19 Python tests, Python/JavaScript checks, and 1 Chromium E2E smoke test.
+- Next: Add isolated workflow tests for reservation create, edit, and completion before relying on browser tests for those user journeys.
 
 ### 2026-07-13
 
@@ -101,40 +98,3 @@
 - Learned: `equipment_spec` requires the manual Supabase SQL before it can be persisted by the hosted frontend.
 - Verification: Pending final documentation commit; prior 19 frontend/API checks passed.
 - Next: New maintainer should run the handoff checklist and confirm Pages plus Supabase in a clean browser session.
-
-### 2026-08-10
-
-- Focus: Restore blank-cell reservation clicks without losing horizontal Gantt dragging.
-- Changed: Added a 6px horizontal movement threshold before pointer capture, kept normal clicks available for lane reservation, and changed the idle Gantt cursor from `grab` to the default cursor.
-- Learned: Capturing the pointer immediately on `pointerdown` caused a simple lane click to be treated as a drag gesture.
-- Verification: Browser check opened a blank-cell reservation dialog with equipment prefilled, start time at 08:30, and blank end time; an actual horizontal drag still changed `scrollLeft` and cleared the dragging state afterward.
-- Next: Keep this cloud-feature worktree uncommitted and unsynced until explicitly requested.
-
-### 2026-08-10 (follow-up)
-
-- Focus: Change blank-cell reservation activation to double-click.
-- Changed: Replaced the main Gantt lane reservation listener with `dblclick` and renamed the handler to reflect the interaction.
-- Verification: Static regression test confirms the lane no longer listens for single-click reservation activation.
-
-### 2026-08-10 (display range follow-up)
-
-- Focus: Use a fixed 31-day display window for the reservation Gantt and bulletin board.
-- Changed: Centralized the fixed display range, updated the main date label and bulletin range to 31 days, sized both Gantt column widths against the container, and re-rendered the visible board after view changes or resize.
-- Preserved: The main schedule's six-month extension buffer, month navigation, drag behavior, reservation interactions, colors, and bulletin playback logic.
-- Verification: Browser checks showed the main label as an exact 31-day window and the bulletin board rendered 31 date cells; static tests and JavaScript syntax checks passed.
-
-### 2026-08-11
-
-- Focus: Align bulletin and reservation Gantt grid lines.
-- Changed: Removed the bulletin-only minimum-width expansion and explicitly set each Gantt scale and chart to the same calculated width (`220px + dayCount × dayWidth`).
-- Learned: `min-width` allowed the block containers to expand beyond the inline grid tracks, so lane background lines were calculated over a wider width than the date headers.
-- Verification: Browser geometry checks at desktop and mobile sizes reported zero day-to-lane width delta for both bulletin and reservation Gantts; focused regression test passed.
-
-- Focus: Correct reservation bar date spans on long Gantt ranges.
-- Changed: Replaced the fixed `1.4%` minimum bar width with a range-aware one-day minimum (`100 / dayCount`), so short and single-day reservations no longer render as several days wide when the main schedule contains hundreds of days.
-- Root cause: On a 393-day schedule, the fixed minimum rendered every short bar at about 5.5 days; for example, the 07/06–07/10 reservation and the 08/02 single-day reservation were both visibly too wide.
-- Verification: Browser measurements showed the 07/06–07/10 bar at about 95px (4.08 days) and the 08/02 single-day bar at about 24px (1 day); bulletin bars also retained one-day alignment. Focused regression test, full test suite, syntax check, and diff check passed.
-
-- Focus: Add 校驗 as a reservation purpose and identify it on Gantt charts.
-- Changed: Added 校驗 to the reservation purpose selector and applied a shared `purpose-calibration` class to reservation, bulletin, and equipment schedule bars; active bars are orange and completed bars are soft orange.
-- Verification: Browser inspection confirmed the new purpose option and computed orange colors (`rgb(249, 115, 22)`) for main and bulletin bar styles, with soft orange for completed bars; mobile viewport remained horizontally scrollable for the Gantt.

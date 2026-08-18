@@ -53,6 +53,7 @@ class ApiTestCase(unittest.TestCase):
             {
                 "name": "環境箱 A-1",
                 "category": "環測",
+                "label_name": "A-1",
                 "location": "可靠度實驗室 3F",
                 "capacity": 3,
                 "equipment_spec": "落下高度：1 m",
@@ -63,6 +64,7 @@ class ApiTestCase(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(data["equipment"]["name"], "環境箱 A-1")
+        self.assertEqual(data["equipment"]["label_name"], "A-1")
         self.assertEqual(data["equipment"]["location"], "可靠度實驗室 3F")
         self.assertEqual(data["equipment"]["capacity"], 3)
         self.assertEqual(data["equipment"]["equipment_spec"], "落下高度：1 m")
@@ -72,6 +74,7 @@ class ApiTestCase(unittest.TestCase):
         status, equipment = self.request("GET", "/api/equipment")
         updated = next(item for item in equipment["equipment"] if item["id"] == 1)
         self.assertEqual(updated["name"], "環境箱 A-1")
+        self.assertEqual(updated["label_name"], "A-1")
         self.assertEqual(updated["status"], "validation")
 
     def test_capacity_allows_that_many_overlapping_reservations(self):
@@ -80,6 +83,7 @@ class ApiTestCase(unittest.TestCase):
             "/api/equipment",
             {
                 "name": "Shared Drop Tester",
+                "label_name": "Shared Drop",
                 "category": "DROP",
                 "location": "可靠度實驗室 3F",
                 "capacity": 2,
@@ -87,6 +91,7 @@ class ApiTestCase(unittest.TestCase):
             },
         )
         equipment = equipment_data["equipment"]
+        self.assertEqual(equipment["label_name"], "Shared Drop")
         self.assertEqual(equipment["equipment_spec"], "最大試片重量：5 kg")
 
         reservation = {

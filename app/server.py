@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import math
 import sqlite3
 import threading
 from datetime import datetime
@@ -36,6 +37,7 @@ class App:
                 CREATE TABLE IF NOT EXISTS equipment (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
+                    label_name TEXT NOT NULL DEFAULT '',
                     category TEXT NOT NULL,
                     location TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'available',
@@ -43,6 +45,19 @@ class App:
                     equipment_spec TEXT NOT NULL DEFAULT '',
                     is_active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS equipment_floorplan_placements (
+                    equipment_id INTEGER PRIMARY KEY REFERENCES equipment (id) ON DELETE CASCADE,
+                    x_percent REAL NOT NULL CHECK (x_percent >= 0 AND x_percent <= 100),
+                    y_percent REAL NOT NULL CHECK (y_percent >= 0 AND y_percent <= 100),
+                    width_percent REAL NOT NULL CHECK (width_percent > 0 AND width_percent <= 100),
+                    height_percent REAL NOT NULL CHECK (height_percent > 0 AND height_percent <= 100),
+                    location_state TEXT NOT NULL DEFAULT 'placed'
+                        CHECK (location_state IN ('unplaced', 'placing', 'placed')),
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CHECK (x_percent + width_percent <= 100),
+                    CHECK (y_percent + height_percent <= 100)
                 );
 
                 CREATE TABLE IF NOT EXISTS reservations (
@@ -85,6 +100,10 @@ class App:
             if "equipment_spec" not in equipment_columns:
                 conn.execute(
                     "ALTER TABLE equipment ADD COLUMN equipment_spec TEXT NOT NULL DEFAULT ''"
+                )
+            if "label_name" not in equipment_columns:
+                conn.execute(
+                    "ALTER TABLE equipment ADD COLUMN label_name TEXT NOT NULL DEFAULT ''"
                 )
             reservation_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(reservations)").fetchall()
@@ -144,6 +163,41 @@ def normalize_status(value: str):
     if status not in allowed_statuses:
         raise ApiError(400, "status must be available, validation, maintenance, or offline")
     return status
+
+
+def normalize_floorplan_placement(item: dict[str, Any]):
+    """Validate and clamp one imported floorplan placement for SQLite."""
+    try:
+        equipment_id = int(item.get("equipment_id"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("equipment_id must be an integer") from exc
+    if equipment_id < 1:
+        raise ValueError("equipment_id must be positive")
+
+    def number(field: str, default: float):
+        try:
+            value = float(item.get(field, default))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be a number") from exc
+        if not math.isfinite(value):
+            raise ValueError(f"{field} must be finite")
+        return value
+
+    width = min(max(number("width_percent", 8), 3), 100)
+    height = min(max(number("height_percent", 8), 3), 100)
+    x = min(max(number("x_percent", 0), 0), max(100 - width, 0))
+    y = min(max(number("y_percent", 0), 0), max(100 - height, 0))
+    location_state = str(item.get("location_state", "placed") or "placed").strip()
+    if location_state not in {"unplaced", "placing", "placed"}:
+        raise ValueError("location_state must be unplaced, placing, or placed")
+    return {
+        "equipment_id": equipment_id,
+        "x_percent": round(x, 2),
+        "y_percent": round(y, 2),
+        "width_percent": round(width, 2),
+        "height_percent": round(height, 2),
+        "location_state": location_state,
+    }
 
 
 def parse_int(value: Any, field: str):
@@ -237,7 +291,7 @@ class Handler(SimpleHTTPRequestHandler):
         with self.app.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, name, category, location, status, capacity, equipment_spec, is_active
+                SELECT id, name, label_name, category, location, status, capacity, equipment_spec, is_active
                 FROM equipment
                 ORDER BY is_active DESC, category, name
                 """
@@ -254,17 +308,19 @@ class Handler(SimpleHTTPRequestHandler):
         if capacity < 1:
             raise ApiError(400, "capacity must be at least 1")
         status = normalize_status(data.get("status", "available"))
+        label_name = str(data.get("label_name", "")).strip()
         equipment_spec = str(data.get("equipment_spec", "")).strip()
         is_active = 1 if parse_int(data.get("is_active", 1), "is_active") else 0
         with self.app.connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO equipment
-                    (name, category, location, status, capacity, equipment_spec, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (name, label_name, category, location, status, capacity, equipment_spec, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data["name"].strip(),
+                    label_name,
                     data["category"].strip(),
                     str(data.get("location", "")).strip(),
                     status,
@@ -283,6 +339,7 @@ class Handler(SimpleHTTPRequestHandler):
             if current is None:
                 raise ApiError(404, "Equipment not found")
             name = str(data.get("name", current["name"])).strip()
+            label_name = str(data.get("label_name", current["label_name"])).strip()
             category = str(data.get("category", current["category"])).strip()
             location = str(data.get("location", current["location"])).strip()
             status = normalize_status(data.get("status", current["status"]))
@@ -298,15 +355,15 @@ class Handler(SimpleHTTPRequestHandler):
             conn.execute(
                 """
                 UPDATE equipment
-                SET name = ?, category = ?, location = ?, status = ?, capacity = ?,
+                SET name = ?, label_name = ?, category = ?, location = ?, status = ?, capacity = ?,
                     equipment_spec = ?, is_active = ?
                 WHERE id = ?
                 """,
-                (name, category, location, status, capacity, equipment_spec, is_active, equipment_id),
+                (name, label_name, category, location, status, capacity, equipment_spec, is_active, equipment_id),
             )
             row = conn.execute(
                 """
-                SELECT id, name, category, location, status, capacity, equipment_spec, is_active
+                SELECT id, name, label_name, category, location, status, capacity, equipment_spec, is_active
                 FROM equipment
                 WHERE id = ?
                 """,

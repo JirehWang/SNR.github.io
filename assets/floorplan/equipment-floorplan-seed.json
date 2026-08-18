@@ -1,0 +1,19 @@
+[
+  { "equipmentId": 13, "name": "Chamber NO.1", "x": 68.8, "y": 29.22, "w": 5.07, "h": 6.52, "locationState": "placed" },
+  { "equipmentId": 1, "name": "Chamber NO.2", "x": 59.0, "y": 29.22, "w": 5.26, "h": 6.72, "locationState": "placed" },
+  { "equipmentId": 5, "name": "Chamber NO.3", "x": 48.35, "y": 29.22, "w": 5.4, "h": 6.52, "locationState": "placed" },
+  { "equipmentId": 6, "name": "Chamber NO.4", "x": 68.4, "y": 15.88, "w": 5.02, "h": 6.56, "locationState": "placed" },
+  { "equipmentId": 7, "name": "Chamber NO.5", "x": 58.6, "y": 15.88, "w": 4.61, "h": 7.15, "locationState": "placed" },
+  { "equipmentId": 8, "name": "Chamber NO.6", "x": 48.15, "y": 15.69, "w": 4.7, "h": 7.15, "locationState": "placed" },
+  { "equipmentId": 9, "name": "Chamber NO.7", "x": 37.75, "y": 29.41, "w": 5.34, "h": 6.92, "locationState": "placed" },
+  { "equipmentId": 10, "name": "Chamber NO.8", "x": 27.03, "y": 29.22, "w": 5.27, "h": 6.72, "locationState": "placed" },
+  { "equipmentId": 11, "name": "Chamber NO.9", "x": 26.85, "y": 15.88, "w": 4.68, "h": 6.55, "locationState": "placed" },
+  { "equipmentId": 12, "name": "Chamber NO.10", "x": 4.55, "y": 15.23, "w": 13.02, "h": 7.2, "locationState": "placed" },
+  { "equipmentId": 2, "name": "震擊測試", "x": 82.5, "y": 70.0, "w": 12.5, "h": 8.0, "locationState": "unplaced" },
+  { "equipmentId": 3, "name": "Drop Tester", "x": 83.2, "y": 2.83, "w": 9.0, "h": 11.9, "locationState": "placed" },
+  { "equipmentId": 4, "name": "Vibration Table", "x": 68.1, "y": 2.83, "w": 10.2, "h": 4.9, "locationState": "placed" },
+  { "equipmentId": 14, "name": "ESS A", "x": 12.6, "y": 30.32, "w": 4.67, "h": 11.77, "locationState": "placed" },
+  { "equipmentId": 15, "name": "ESS B", "x": 12.69, "y": 42.43, "w": 5.78, "h": 10.58, "locationState": "placed" },
+  { "equipmentId": 16, "name": "鹽水噴霧試驗機", "x": 7.25, "y": 61.02, "w": 4.61, "h": 9.27, "locationState": "placed" },
+  { "equipmentId": 17, "name": "ESD靜電測試機", "x": 78.68, "y": 82.6, "w": 14.33, "h": 8.4, "locationState": "placed" }
+]

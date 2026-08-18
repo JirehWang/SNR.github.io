@@ -780,6 +780,12 @@ textarea:focus {
   touch-action: pan-y;
 }
 
+.gantt-schedule-wrap.is-single-filtered {
+  height: auto;
+  min-height: 0;
+  max-height: 220px;
+}
+
 .gantt-schedule-wrap.is-dragging {
   cursor: grabbing;
   user-select: none;
@@ -1732,4 +1738,583 @@ td:nth-child(6) {
   .equipment-card-actions {
     justify-items: start;
   }
+}
+
+
+/* ==========================================================================
+   Laboratory Floorplan Core Styling & Device Absolute Positioning
+   ========================================================================== */
+
+.floorplan-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.floorplan-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.floorplan-canvas-panel {
+  width: 100%;
+}
+
+.floorplan-canvas {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.floorplan-canvas img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  pointer-events: none;
+}
+
+.floorplan-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+}
+
+.floorplan-device {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-sizing: border-box;
+  min-height: 24px;
+  padding: 2px 4px;
+  border: 2px solid rgba(15, 23, 42, 0.82);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #0f172a;
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.18), 0 4px 12px rgba(15, 23, 42, 0.15);
+  transition: filter 120ms ease, opacity 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.floorplan-device.active,
+.floorplan-device.selected {
+  z-index: 10;
+  border-color: var(--brand);
+  background: rgba(31, 111, 235, 0.2);
+  outline: 3px solid #0284c7;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(2, 132, 199, 0.25), 0 8px 24px rgba(2, 132, 199, 0.4);
+}
+
+.floorplan-device.editing {
+  z-index: 12;
+  border-color: rgba(21, 128, 61, 0.88);
+  background: rgba(21, 128, 61, 0.18);
+}
+
+.floorplan-device.is-locked {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0.72;
+  filter: grayscale(1);
+}
+
+.floorplan-device[data-location-state="placed"],
+.floorplan-device.state-available {
+  border-color: rgba(22, 163, 74, 0.88);
+  box-shadow: 0 0 0 2.5px rgba(34, 197, 94, 0.28), 0 0 12px rgba(34, 197, 94, 0.32);
+}
+
+.floorplan-device.state-validation {
+  border-color: #ea580c;
+  background: rgba(249, 115, 22, 0.18);
+  box-shadow: 0 0 0 3.5px rgba(249, 115, 22, 0.38), 0 0 14px rgba(249, 115, 22, 0.5);
+}
+
+.floorplan-device.state-maintenance {
+  border-color: #dc2626;
+  background: rgba(220, 38, 38, 0.18);
+  box-shadow: 0 0 0 3.5px rgba(239, 68, 68, 0.42), 0 0 16px rgba(239, 68, 68, 0.55);
+}
+
+.floorplan-device.is-disabled,
+.floorplan-device.state-offline {
+  border-color: #94a3b8;
+  filter: grayscale(1);
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.floorplan-device.is-booked.requester-category-pqe { border-color: #1d4ed8; background: rgba(37, 99, 235, 0.28); color: #1e3a8a; }
+.floorplan-device.is-booked.requester-category-senao { border-color: #15803d; background: rgba(22, 163, 74, 0.28); color: #14532d; }
+.floorplan-device.is-booked.requester-category-external { border-color: #b45309; background: rgba(217, 119, 6, 0.28); color: #7c2d12; }
+.floorplan-device.is-booked.purpose-calibration { border-color: #d97706; background: rgba(245, 158, 11, 0.35); color: #78350f; }
+
+.floorplan-device.is-dimmed {
+  opacity: 0.42;
+  filter: grayscale(0.35);
+}
+
+.floorplan-device-label {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.floorplan-booking-badge {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  margin-top: 2px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.92);
+  color: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.state-dot {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  border: 1px solid #fff;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.7);
+}
+
+.state-validation .state-dot,
+.floorplan-status-legend .state-dot.state-validation {
+  background: #ea580c;
+  box-shadow: 0 0 6px rgba(234, 88, 12, 0.8);
+}
+
+.state-maintenance .state-dot,
+.floorplan-status-legend .state-dot.state-maintenance {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.8);
+}
+
+.state-offline .state-dot,
+.floorplan-status-legend .state-dot.state-offline {
+  background: #94a3b8;
+  box-shadow: none;
+}
+
+.floorplan-status-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.floorplan-status-legend .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.floorplan-status-legend .state-dot {
+  position: static;
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+}
+
+.floorplan-status-legend .state-dot.state-available {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.8);
+}
+
+.floorplan-status-legend .state-dot.requester-category-pqe {
+  background: #2563eb;
+  box-shadow: 0 0 6px rgba(37, 99, 235, 0.8);
+}
+
+.floorplan-status-legend .state-dot.requester-category-senao {
+  background: #16a34a;
+  box-shadow: 0 0 6px rgba(22, 163, 74, 0.8);
+}
+
+.floorplan-status-legend .state-dot.requester-category-external {
+  background: #d97706;
+  box-shadow: 0 0 6px rgba(217, 119, 6, 0.8);
+}
+
+.floorplan-status-legend .state-dot.purpose-calibration {
+  background: #eab308;
+  box-shadow: 0 0 6px rgba(234, 179, 8, 0.8);
+}
+
+/* Floorplan Controls & Thumbnail (1/9 Area) View */
+.floorplan-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.icon-btn-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 12px;
+  min-height: 34px;
+}
+
+.icon-btn-text .toggle-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.reservation-floorplan-panel.is-thumbnail .floorplan-canvas-panel {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.reservation-floorplan-panel.is-thumbnail .floorplan-canvas {
+  width: clamp(280px, 33.333%, 380px);
+  max-width: 380px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.reservation-floorplan-panel:not(.is-thumbnail) .floorplan-canvas {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 10px;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.reservation-floorplan-panel.is-thumbnail .floorplan-expand-overlay-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 12;
+  background: rgba(15, 23, 42, 0.85);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.reservation-floorplan-panel.is-thumbnail .floorplan-expand-overlay-btn:hover {
+  background: var(--brand);
+  transform: scale(1.05);
+}
+
+.reservation-floorplan-panel:not(.is-thumbnail) .floorplan-expand-overlay-btn {
+  display: none;
+}
+
+.reservation-floorplan-panel.is-thumbnail .floorplan-device {
+  font-size: 9px;
+  padding: 1px 2px;
+}
+
+.reservation-floorplan-panel.is-thumbnail .floorplan-device-label {
+  font-size: 9px;
+  line-height: 1;
+}
+
+.reservation-floorplan-panel.is-thumbnail .floorplan-booking-badge {
+  font-size: 8px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.reservation-floorplan-panel.is-thumbnail .state-dot {
+  width: 5px;
+  height: 5px;
+}
+
+/* Floorplan Resize Handles & Editor */
+.floorplan-resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--brand);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.18);
+}
+.floorplan-resize-handle[data-resize="nw"] { top: 0; left: 0; transform: translate(-50%, -50%); cursor: nwse-resize; }
+.floorplan-resize-handle[data-resize="ne"] { top: 0; right: 0; transform: translate(50%, -50%); cursor: nesw-resize; }
+.floorplan-resize-handle[data-resize="sw"] { bottom: 0; left: 0; transform: translate(-50%, 50%); cursor: nesw-resize; }
+.floorplan-resize-handle[data-resize="se"] { right: 0; bottom: 0; transform: translate(50%, 50%); cursor: nwse-resize; }
+
+.floorplan-inspector { display: grid; gap: 12px; }
+.floorplan-selection-card,
+.floorplan-device-list {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #f8fbff;
+}
+.floorplan-device-list[hidden],
+.disabled-equipment-section[hidden],
+.gantt-filter-notice[hidden] { display: none; }
+.floorplan-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.floorplan-detail-row strong { text-align: right; }
+#floorplanMessage {
+  min-height: 20px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.disabled-equipment-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.disabled-equipment-count { color: var(--muted); font-size: 13px; }
+.disabled-equipment-list { display: grid; gap: 8px; }
+.disabled-equipment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  filter: grayscale(0.7);
+}
+
+.equipment-editor-dialog {
+  width: min(1180px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+.equipment-editor-dialog::backdrop { background: rgba(15, 23, 42, 0.36); }
+.equipment-editor-shell { display: grid; gap: 18px; padding: 20px; }
+.equipment-editor-grid { display: grid; grid-template-columns: minmax(320px, 420px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.equipment-editor-map { display: grid; gap: 12px; }
+.compact-floorplan-canvas { min-height: 540px; background: var(--bg); }
+.compact-floorplan-canvas img { height: 100%; min-height: 540px; object-fit: contain; }
+.floorplan-dialog-meta { min-height: 24px; color: var(--muted); font-size: 13px; }
+
+.workspace-view[data-view="equipment"] .equipment-layout { display: grid; }
+.workspace-view[data-view="equipment"] .floorplan-grid { display: grid; }
+
+.gantt-filter-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 14px;
+  border: 1px solid #bfdbfe;
+  border-left: 4px solid var(--brand);
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 13px;
+}
+.gantt-filter-notice .link-btn { min-height: 0; padding: 0; border: 0; background: none; color: var(--brand); font-size: 13px; font-weight: 700; cursor: pointer; text-decoration: underline; }
+
+/* ==========================================================================
+   Equipment Offline / Maintenance Conflict Alerts & Extension Dialogs
+   ========================================================================== */
+
+.reservation-row.is-equipment-conflict {
+  background-color: rgba(239, 68, 68, 0.08) !important;
+  border-left: 4px solid #ef4444 !important;
+}
+
+.reservation-row.is-equipment-conflict td {
+  color: #7f1d1d;
+}
+
+.reservation-row.is-equipment-conflict strong {
+  color: #991b1b;
+}
+
+.badge.badge-conflict-danger {
+  background: #ef4444 !important;
+  border-color: #dc2626 !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge.validation {
+  background: #ffedd5;
+  color: #ea580c;
+  border: 1px solid #fed7aa;
+}
+
+.gantt-bar.is-equipment-conflict {
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
+  border-color: #7f1d1d !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 0 2px #fecaca !important;
+}
+
+.conflict-warning-dialog,
+.maintenance-extension-dialog {
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 14px;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.32);
+  padding: 0;
+  background: #ffffff;
+  color: #1e293b;
+  overflow: hidden;
+  z-index: 1000;
+}
+
+.conflict-warning-dialog {
+  width: 92vw;
+  max-width: 680px;
+}
+
+.maintenance-extension-dialog {
+  width: 90vw;
+  max-width: 520px;
+}
+
+.conflict-warning-shell,
+.maintenance-extension-shell {
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dialog-header.conflict-header {
+  border-bottom: 2px solid #fee2e2;
+  padding-bottom: 14px;
+}
+
+.dialog-header.conflict-header h2 {
+  color: #dc2626;
+}
+
+.conflict-alert-banner {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.conflict-table-wrap {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.conflict-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.conflict-table-wrap th,
+.conflict-table-wrap td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.conflict-table-wrap th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #475569;
+}
+
+.conflict-guidance {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.6;
+}
+
+.maintenance-info-box {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.maintenance-prompt-text {
+  font-size: 14.5px;
+  color: #1e293b;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+
+.maintenance-extension-actions,
+.form-actions.right-align {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 8px;
 }
