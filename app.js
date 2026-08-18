@@ -1063,18 +1063,24 @@ function bindGanttDrag(wrap) {
   if (!wrap) return;
   wrap.addEventListener("pointerdown", (event) => {
     const target = event.target instanceof Element ? event.target : null;
-    if (event.button !== 0 || target?.closest("button, input, select, textarea, a")) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (target?.closest("button, input, select, textarea, a, .dialog")) return;
     state.ganttDrag = {
       pointerId: event.pointerId,
+      pointerType: event.pointerType,
       startX: event.clientX,
+      startY: event.clientY,
       scrollLeft: wrap.scrollLeft,
+      scrollTop: wrap.scrollTop,
       dragging: false,
     };
   });
   wrap.addEventListener("pointermove", (event) => {
     if (!state.ganttDrag || state.ganttDrag.pointerId !== event.pointerId) return;
+    if (state.ganttDrag.pointerType === "touch") return;
     const deltaX = event.clientX - state.ganttDrag.startX;
-    if (!state.ganttDrag.dragging && Math.abs(deltaX) < GANTT_DRAG_THRESHOLD_PX) return;
+    const deltaY = event.clientY - state.ganttDrag.startY;
+    if (!state.ganttDrag.dragging && Math.hypot(deltaX, deltaY) < GANTT_DRAG_THRESHOLD_PX) return;
     if (!state.ganttDrag.dragging) {
       state.ganttDrag.dragging = true;
       wrap.classList.add("is-dragging");
@@ -1082,6 +1088,7 @@ function bindGanttDrag(wrap) {
     }
     event.preventDefault();
     wrap.scrollLeft = state.ganttDrag.scrollLeft - deltaX;
+    wrap.scrollTop = state.ganttDrag.scrollTop - deltaY;
   });
   const stopDrag = (event) => {
     if (!state.ganttDrag || state.ganttDrag.pointerId !== event.pointerId) return;

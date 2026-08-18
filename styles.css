@@ -769,6 +769,8 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 
 .gantt-schedule-wrap {
@@ -777,7 +779,8 @@ textarea:focus {
   overflow: auto;
   overscroll-behavior: contain;
   cursor: default;
-  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 
 .gantt-schedule-wrap.is-single-filtered {
@@ -808,7 +811,7 @@ textarea:focus {
 }
 
 .gantt-schedule-wrap .gantt-equipment-label {
-  z-index: 1;
+  z-index: 3;
   box-shadow: 8px 0 12px -12px rgba(15, 23, 42, 0.65);
 }
 
@@ -822,6 +825,8 @@ textarea:focus {
   overflow-y: auto;
   scroll-padding-top: 41px;
   scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 
 .gantt-scale {
