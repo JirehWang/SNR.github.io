@@ -1997,7 +1997,8 @@ td:nth-child(6) {
 
 .reservation-floorplan-panel.is-thumbnail .floorplan-canvas-panel {
   display: flex;
-  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 16px;
 }
 
 .reservation-floorplan-panel.is-thumbnail .floorplan-canvas {
@@ -2009,6 +2010,7 @@ td:nth-child(6) {
   position: relative;
   overflow: hidden;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .reservation-floorplan-panel:not(.is-thumbnail) .floorplan-canvas {
@@ -2019,29 +2021,28 @@ td:nth-child(6) {
 }
 
 .reservation-floorplan-panel.is-thumbnail .floorplan-expand-overlay-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 12;
-  background: rgba(15, 23, 42, 0.85);
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.88);
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 11px;
+  padding: 8px 14px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(4px);
-  transition: background 0.2s ease, transform 0.15s ease;
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+  white-space: nowrap;
+  margin-top: 4px;
 }
 
 .reservation-floorplan-panel.is-thumbnail .floorplan-expand-overlay-btn:hover {
   background: var(--brand);
-  transform: scale(1.05);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(31, 111, 235, 0.35);
 }
 
 .reservation-floorplan-panel:not(.is-thumbnail) .floorplan-expand-overlay-btn {
