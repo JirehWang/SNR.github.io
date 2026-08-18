@@ -39,6 +39,7 @@
         <button type="button" class="workspace-tab active" data-view-target="reservation" aria-selected="true">預約作業</button>
         <button type="button" class="workspace-tab" data-view-target="equipment" aria-selected="false">設備管理</button>
         <button type="button" class="workspace-tab" data-view-target="requester" aria-selected="false">使用者管理</button>
+        <button type="button" class="workspace-tab" data-view-target="analytics" aria-selected="false">稼動率統計</button>
         <button type="button" class="workspace-tab" data-view-target="bulletin" aria-selected="false">公佈欄</button>
       </div>
 
@@ -56,10 +57,10 @@
                     <span class="legend-item"><span class="state-dot state-available"></span> 空閒可預約</span>
                     <span class="legend-item"><span class="state-dot state-validation"></span> 驗證中</span>
                     <span class="legend-item"><span class="state-dot state-maintenance"></span> 維修中</span>
-                    <span class="legend-item"><span class="state-dot requester-category-pqe"></span> PQE 預約</span>
-                    <span class="legend-item"><span class="state-dot requester-category-senao"></span> 神準預約</span>
-                    <span class="legend-item"><span class="state-dot requester-category-external"></span> 外部預約</span>
-                    <span class="legend-item"><span class="state-dot purpose-calibration"></span> 校正中</span>
+                    <span class="legend-item"><span class="category-block requester-category-pqe"></span> PQE 預約</span>
+                    <span class="legend-item"><span class="category-block requester-category-senao"></span> 神準預約</span>
+                    <span class="legend-item"><span class="category-block requester-category-external"></span> 外部預約</span>
+                    <span class="legend-item"><span class="category-block purpose-calibration"></span> 校正中</span>
                   </div>
                   <button type="button" id="reservationFloorplanToggleBtn" class="secondary icon-btn-text" title="展開全圖" aria-label="展開全圖">
                     <span class="toggle-icon">&#x2922;</span>
@@ -380,6 +381,116 @@
         </div>
       </div>
 
+      <div class="workspace-view" data-view="analytics">
+        <section class="panel section-panel analytics-panel" aria-label="設備稼動率統計">
+          <div class="section-title with-controls">
+            <div>
+              <h2>設備稼動率統計分析</h2>
+              <p>選定日期範圍自動彙整各設備之基礎稼動率與加權重複預約稼動率，並支援匯出 Excel 報表。</p>
+            </div>
+            <div class="analytics-actions">
+              <button type="button" id="analyticsExportBtn" class="primary icon-btn-text" title="匯出 Excel 報表">
+                <span>📥 匯出 Excel 報表</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 篩選工具列 -->
+          <div class="analytics-toolbar">
+            <div class="analytics-date-range">
+              <label>
+                開始日期
+                <input type="date" id="analyticsStartDate">
+              </label>
+              <span class="range-separator">至</span>
+              <label>
+                結束日期
+                <input type="date" id="analyticsEndDate">
+              </label>
+            </div>
+
+            <div class="analytics-presets" role="group" aria-label="快速選擇區間">
+              <button type="button" class="secondary small analytics-preset-btn active" data-preset="this-month">本月</button>
+              <button type="button" class="secondary small analytics-preset-btn" data-preset="last-month">上月</button>
+              <button type="button" class="secondary small analytics-preset-btn" data-preset="this-week">本週</button>
+              <button type="button" class="secondary small analytics-preset-btn" data-preset="last-30">近 30 天</button>
+              <button type="button" class="secondary small analytics-preset-btn" data-preset="last-90">近 90 天</button>
+            </div>
+
+            <div class="analytics-filter-controls">
+              <label>
+                設備篩選
+                <select id="analyticsEquipmentSelect">
+                  <option value="all">全部設備 (所有機台)</option>
+                </select>
+              </label>
+              <button type="button" id="analyticsCalculateBtn" class="secondary">
+                <span>🔍 重新計算</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 彙整指標 KPI 卡片 -->
+          <div class="analytics-kpi-grid">
+            <div class="metric-card">
+              <span>分析區間總天數</span>
+              <strong id="analyticsPeriodDays">0 天</strong>
+              <em id="analyticsPeriodRangeText">--</em>
+            </div>
+            <div class="metric-card">
+              <span>可靠度設備平均基礎稼動率</span>
+              <strong id="analyticsAvgBaseRate">0.0%</strong>
+              <em>實際有專案進行/結案之天數比例</em>
+            </div>
+            <div class="metric-card">
+              <span>可靠度設備平均加權稼動率</span>
+              <strong id="analyticsAvgWeightedRate">0.0%</strong>
+              <em>含多專案重複預約之總負荷比例</em>
+            </div>
+            <div class="metric-card">
+              <span>納入統計專案數</span>
+              <strong id="analyticsTotalProjects">0 筆</strong>
+              <em>已結案與進行中之有效預約</em>
+            </div>
+          </div>
+
+          <!-- 計算公式說明提示 -->
+          <div class="analytics-formula-notice">
+            <div class="formula-item">
+              <span class="formula-badge base">模式 1 基礎稼動率</span>
+              <span><strong>=（區間內有專案進行或結案之天數 ÷ 統計總天數）× 100%</strong>（每日最高 100%）</span>
+            </div>
+            <div class="formula-item">
+              <span class="formula-badge weighted">模式 2 加權重複稼動率</span>
+              <span><strong>=（區間內每日專案預約筆數總累計 ÷ 統計總天數）× 100%</strong>（當天有 2 筆即為 200%，可大於 100%）</span>
+            </div>
+          </div>
+
+          <!-- 設備稼動率明細表格 -->
+          <div class="analytics-table-wrap">
+            <table class="analytics-table" id="analyticsTable">
+              <thead>
+                <tr>
+                  <th>設備名稱</th>
+                  <th>類別</th>
+                  <th class="center">可重疊量</th>
+                  <th class="center">統計天數</th>
+                  <th class="center">基礎稼動天數</th>
+                  <th class="center">基礎稼動率</th>
+                  <th class="center">專案累計天數</th>
+                  <th class="center">重複加權稼動率</th>
+                  <th class="center">專案總筆數</th>
+                  <th class="center">設備狀態</th>
+                </tr>
+              </thead>
+              <tbody id="analyticsTableBody">
+                <!-- 動態注入 -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
       <div class="workspace-view" data-view="bulletin">
         <section id="bulletinBoard" class="panel section-panel bulletin-panel" aria-label="設備使用公佈欄">
             <div class="section-title with-controls">
@@ -624,6 +735,7 @@
     </div>
   </dialog>
 
+  <script src="./assets/vendor/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./app.js"></script>
 </body>

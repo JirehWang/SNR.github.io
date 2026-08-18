@@ -309,6 +309,49 @@ class StaticUiTestCase(unittest.TestCase):
         self.assertIn("alter table public.equipment", sql)
         self.assertIn("alter column capacity type text", sql)
 
+    def test_equipment_utilization_analytics_assets_are_present(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        css = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('data-view-target="analytics"', html)
+        self.assertIn('data-view="analytics"', html)
+        self.assertIn('id="analyticsStartDate"', html)
+        self.assertIn('id="analyticsEndDate"', html)
+        self.assertIn('id="analyticsEquipmentSelect"', html)
+        self.assertIn('id="analyticsCalculateBtn"', html)
+        self.assertIn('id="analyticsExportBtn"', html)
+        self.assertIn('id="analyticsPeriodDays"', html)
+        self.assertIn('id="analyticsAvgBaseRate"', html)
+        self.assertIn('id="analyticsAvgWeightedRate"', html)
+        self.assertIn('id="analyticsTable"', html)
+        self.assertIn('id="analyticsTableBody"', html)
+        self.assertIn(".analytics-panel", css)
+        self.assertIn(".analytics-kpi-grid", css)
+        self.assertIn("function calculateEquipmentUtilization", js)
+        self.assertIn("function renderUtilizationAnalytics", js)
+        self.assertIn("function exportUtilizationToExcel", js)
+        self.assertIn(".xlsx", js)
+        self.assertIn("xlsx.full.min.js", html)
+
+    def test_validation_equipment_is_bookable(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function isEquipmentBookable(equipment)", js)
+        self.assertIn('equipment.status === "available" || equipment.status === "validation"', js)
+        self.assertIn('equipment.status === "maintenance"', js)
+        self.assertIn("isEquipmentBookable(item)", js)
+        self.assertIn("isEquipmentBookable(equipment)", js)
+
+    def test_gantt_equipment_label_opens_readonly_equipment_dialog(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('startEditEquipment(equipment.id, { readOnly: true })', js)
+        self.assertIn("state.equipmentDialogReadOnly = isReadOnly", js)
+        self.assertIn("openReservationFromGanttCell(equipment, date)", js)
+        self.assertIn("if (!isEquipmentBookable(equipment))", js)
+
 
 if __name__ == "__main__":
     unittest.main()
+

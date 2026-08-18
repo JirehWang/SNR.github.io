@@ -262,6 +262,7 @@ const state = {
   floorplanStorageMode: "seed",
   equipmentDialogOpen: false,
   equipmentDialogSaved: false,
+  equipmentDialogReadOnly: false,
   equipmentDraftEquipmentId: null,
   equipmentDraftPlacements: [],
   equipmentDraftPointer: null,
@@ -282,6 +283,11 @@ const state = {
     animationFrameId: null,
     direction: "down",
   },
+  analyticsPreset: "this-month",
+  analyticsStartDate: "",
+  analyticsEndDate: "",
+  analyticsEquipmentId: "all",
+  analyticsData: null,
 };
 
 const statusText = {
@@ -386,6 +392,34 @@ function bindEvents() {
   document.querySelectorAll("[data-view-target]").forEach((button) => {
     button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
   });
+
+  // Analytics event bindings
+  document.querySelectorAll(".analytics-preset-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".analytics-preset-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const preset = btn.dataset.preset;
+      state.analyticsPreset = preset;
+      const range = getPresetDateRange(preset);
+      const startInput = document.getElementById("analyticsStartDate");
+      const endInput = document.getElementById("analyticsEndDate");
+      if (startInput) startInput.value = range.start;
+      if (endInput) endInput.value = range.end;
+      renderUtilizationAnalytics();
+    });
+  });
+  document.getElementById("analyticsStartDate")?.addEventListener("change", () => {
+    document.querySelectorAll(".analytics-preset-btn").forEach((b) => b.classList.remove("active"));
+    renderUtilizationAnalytics();
+  });
+  document.getElementById("analyticsEndDate")?.addEventListener("change", () => {
+    document.querySelectorAll(".analytics-preset-btn").forEach((b) => b.classList.remove("active"));
+    renderUtilizationAnalytics();
+  });
+  document.getElementById("analyticsEquipmentSelect")?.addEventListener("change", renderUtilizationAnalytics);
+  document.getElementById("analyticsCalculateBtn")?.addEventListener("click", renderUtilizationAnalytics);
+  document.getElementById("analyticsExportBtn")?.addEventListener("click", exportUtilizationToExcel);
+
   document.getElementById("reservationOpenTab").addEventListener("click", () => setReservationListStatus("open"));
   document.getElementById("reservationClosedTab").addEventListener("click", () => setReservationListStatus("closed"));
   document.getElementById("reservationPrevPage").addEventListener("click", () => moveReservationListPage(-1));
@@ -684,6 +718,7 @@ function renderAll() {
   renderDashboardMetrics();
   renderEquipmentOptions();
   renderRequesterOptions();
+  renderAnalyticsEquipmentOptions();
   renderRequesterSummary();
   renderEquipmentSummary();
   renderEquipmentFloorplan();
@@ -694,6 +729,9 @@ function renderAll() {
   renderBulletinBoard();
   renderReservationRows();
   renderConnectionState();
+  if (state.activeView === "analytics") {
+    renderUtilizationAnalytics();
+  }
   syncEquipmentForm();
   if (state.equipmentDialogOpen) {
     renderEquipmentEditorFloorplan();
@@ -735,8 +773,8 @@ function closeReservationCreateDialog() {
 }
 
 function openReservationFromGanttCell(equipment, date) {
-  if (!equipment.is_active || equipment.status !== "available") {
-    renderNotice("此設備目前不可預約。", "error");
+  if (!isEquipmentBookable(equipment)) {
+    renderNotice("此設備目前不可預約（僅維修中與停用設備無法預約）。", "error");
     return;
   }
   openReservationCreateDialog({
@@ -813,6 +851,8 @@ function setActiveView(viewName) {
     renderGantt({ scrollDate: state.scheduleFocusDate || state.scheduleStart });
   } else if (viewName === "bulletin") {
     renderBulletinBoard();
+  } else if (viewName === "analytics") {
+    renderUtilizationAnalytics();
   }
 }
 
@@ -834,19 +874,20 @@ function renderDashboardMetrics() {
     const effectiveStatus = getEffectiveReservationStatus(item);
     return effectiveStatus !== "cancelled" && effectiveStatus !== "checked_out";
   });
-  const available = state.equipment.filter((item) => item.status === "available" && item.is_active).length;
-  const validation = state.equipment.filter((item) => item.status === "validation" && item.is_active).length;
-  const maintenance = state.equipment.filter((item) => item.status === "maintenance" && item.is_active).length;
-  const offline = state.equipment.filter((item) => item.status === "offline" || !item.is_active).length;
+  const available = state.equipment.filter((item) => item.status === "available" && !isEquipmentDisabled(item)).length;
+  const validation = state.equipment.filter((item) => item.status === "validation" && !isEquipmentDisabled(item)).length;
+  const maintenance = state.equipment.filter((item) => item.status === "maintenance" && !isEquipmentDisabled(item)).length;
+  const offline = state.equipment.filter((item) => isEquipmentDisabled(item)).length;
+  const bookable = state.equipment.filter((item) => isEquipmentBookable(item)).length;
   const reservedHours = activeReservations.reduce((total, reservation) => {
     return total + getReservationHoursWithinWeek(reservation);
   }, 0);
 
   const metrics = [
-    { label: "設備總數", value: state.equipment.length, hint: `可預約 ${available} 台` },
+    { label: "設備總數", value: state.equipment.length, hint: `可預約 ${bookable} 台` },
     { label: "本週預約", value: activeReservations.length, hint: `${reservedHours.toFixed(1)} 小時` },
-    { label: "驗證中", value: validation, hint: "狀態追蹤" },
-    { label: "維修中", value: maintenance, hint: "維護排程" },
+    { label: "驗證中", value: validation, hint: "可預約" },
+    { label: "維修中", value: maintenance, hint: "不可預約" },
     { label: "停用 / 離線", value: offline, hint: "不可預約" },
   ];
 
@@ -1122,12 +1163,12 @@ function renderEquipmentOptions() {
   select.innerHTML = "";
 
   state.equipment
-    .filter((item) => item.is_active && item.status === "available")
+    .filter((item) => isEquipmentBookable(item))
     .forEach((item) => {
       const view = getEquipmentViewModel(item);
       const option = document.createElement("option");
       option.value = view.id;
-      option.textContent = view.optionText;
+      option.textContent = item.status === "validation" ? `${view.optionText} [驗證中]` : view.optionText;
       select.appendChild(option);
     });
 
@@ -1149,6 +1190,7 @@ function getEquipmentViewModel(equipment) {
   const status = equipment.status || "offline";
   const statusLabel = statusText[status] || status;
   const isActive = isTruthyFlag(equipment.is_active);
+  const isBookable = isEquipmentBookable(equipment);
   return {
     id: equipment.id,
     name: equipment.name || "-",
@@ -1160,7 +1202,8 @@ function getEquipmentViewModel(equipment) {
     status,
     statusLabel,
     isActive,
-    isDisabled: status === "offline" || !isActive,
+    isBookable,
+    isDisabled: isEquipmentDisabled(equipment),
     requiresTestCondition: isTruthyFlag(equipment.requires_test_condition),
     requiresTestConditionLabel: isTruthyFlag(equipment.requires_test_condition) ? "必填" : "非必填",
     labelText: `${equipment.category || "-"} / ${statusLabel}`,
@@ -1206,12 +1249,14 @@ function renderEquipmentSummary() {
   });
 }
 
-function startEditEquipment(equipmentId) {
+function startEditEquipment(equipmentId, options = {}) {
+  const isReadOnly = Boolean(options?.readOnly);
+  state.equipmentDialogReadOnly = isReadOnly;
   const dialog = document.getElementById("equipmentEditorDialog");
   const normalizedEquipmentId = equipmentId == null ? null : Number(equipmentId);
   const equipment = state.equipment.find((item) => Number(item.id) === normalizedEquipmentId) || null;
 
-  if (equipment && equipment.status === "maintenance" && isMaintenanceExpired(equipment)) {
+  if (!isReadOnly && equipment && equipment.status === "maintenance" && isMaintenanceExpired(equipment)) {
     promptMaintenanceExtensionDialog(equipment);
     return;
   }
@@ -1242,7 +1287,9 @@ function startEditEquipment(equipmentId) {
   state.equipmentFormDirty = false;
   syncEquipmentForm();
   renderEquipmentEditorFloorplan();
-  setActiveView("equipment");
+  if (!isReadOnly) {
+    setActiveView("equipment");
+  }
   if (dialog?.open) return;
   dialog?.showModal();
 }
@@ -1255,8 +1302,43 @@ function syncEquipmentForm() {
   const resetButton = document.getElementById("equipmentResetBtn");
   const message = document.getElementById("equipmentMessage");
   const equipment = state.equipment.find((item) => Number(item.id) === state.editingEquipmentId);
+  const draftSubmitBtn = document.getElementById("equipmentEditorDraftSubmitBtn");
+  const draftResetBtn = document.getElementById("equipmentEditorDraftResetBtn");
+  const draftCancelBtn = document.getElementById("equipmentEditorDraftCancelBtn");
+  const draftSectionP = document.querySelector(".equipment-editor-map .section-title p");
 
-  if (state.equipmentFormDirty) return;
+  if (state.equipmentFormDirty && !state.equipmentDialogReadOnly) return;
+
+  const isReadOnly = state.equipmentDialogReadOnly;
+
+  const formElements = form?.elements ? Array.from(form.elements) : [];
+  const draftForm = document.getElementById("equipmentEditorDraftForm");
+  const draftElements = draftForm ? Array.from(draftForm.querySelectorAll("input, select, textarea")) : [];
+  [...formElements, ...draftElements].forEach((el) => {
+    if (el.tagName === "BUTTON") return;
+    el.disabled = isReadOnly;
+  });
+
+  if (isReadOnly) {
+    if (draftSubmitBtn) draftSubmitBtn.style.display = "none";
+    if (draftResetBtn) draftResetBtn.style.display = "none";
+    if (draftCancelBtn) draftCancelBtn.textContent = "關閉";
+    if (draftSectionP) draftSectionP.textContent = "設備位置配置（唯讀預覽）。";
+    if (submitButton) submitButton.hidden = true;
+    if (resetButton) resetButton.hidden = true;
+    if (cancelButton) {
+      cancelButton.textContent = "關閉";
+      cancelButton.hidden = false;
+    }
+  } else {
+    if (draftSubmitBtn) draftSubmitBtn.style.display = "";
+    if (draftResetBtn) draftResetBtn.style.display = "";
+    if (draftCancelBtn) draftCancelBtn.textContent = "關閉";
+    if (draftSectionP) draftSectionP.textContent = "拖曳或調整角落控制點；按下送出才會寫回主平面圖。";
+    if (submitButton) submitButton.hidden = false;
+    if (resetButton) resetButton.hidden = false;
+    if (cancelButton) cancelButton.textContent = "取消";
+  }
 
   if (!equipment) {
     title.textContent = "新增/編輯設備資訊";
@@ -1264,9 +1346,9 @@ function syncEquipmentForm() {
     const draftSubtitle = document.getElementById("equipmentEditorSubtitle");
     if (draftTitle) draftTitle.textContent = "新增設備";
     if (draftSubtitle) draftSubtitle.textContent = "填寫設備資料並完成平面圖草稿定位後送出。";
-    submitButton.textContent = "新增設備";
-    cancelButton.hidden = true;
-    resetButton.textContent = "清空";
+    if (submitButton) submitButton.textContent = "新增設備";
+    if (cancelButton) cancelButton.hidden = true;
+    if (resetButton) resetButton.textContent = "清空";
     form.elements.equipment_id.value = "";
     form.elements.name.value = "";
     if (form.elements.label_name) form.elements.label_name.value = "";
@@ -1284,14 +1366,14 @@ function syncEquipmentForm() {
     return;
   }
 
-  title.textContent = `編輯設備資訊：${equipment.name}`;
+  title.textContent = isReadOnly ? `設備詳細資訊：${equipment.name} (唯讀)` : `編輯設備資訊：${equipment.name}`;
   const draftTitle = document.getElementById("equipmentEditorDraftTitle");
   const draftSubtitle = document.getElementById("equipmentEditorSubtitle");
-  if (draftTitle) draftTitle.textContent = `編輯設備：${equipment.name}`;
-  if (draftSubtitle) draftSubtitle.textContent = "調整設備資料或平面圖草稿定位後送出。";
-  submitButton.textContent = "儲存變更";
-  cancelButton.hidden = false;
-  resetButton.textContent = "回復原值";
+  if (draftTitle) draftTitle.textContent = isReadOnly ? `設備詳細資訊：${equipment.name}` : `編輯設備：${equipment.name}`;
+  if (draftSubtitle) draftSubtitle.textContent = isReadOnly ? "此視窗為唯讀瀏覽模式，僅供查看設備規格、狀態與位置配置。" : "調整設備資料或平面圖草稿定位後送出。";
+  if (submitButton) submitButton.textContent = "儲存變更";
+  if (cancelButton) cancelButton.hidden = false;
+  if (resetButton) resetButton.textContent = "回復原值";
   form.elements.equipment_id.value = String(equipment.id);
   form.elements.name.value = equipment.name;
   if (form.elements.label_name) form.elements.label_name.value = equipment.label_name || "";
@@ -1319,6 +1401,7 @@ function syncEquipmentEditorDraftForm() {
 }
 
 function handleEquipmentEditorDraftInput(event) {
+  if (state.equipmentDialogReadOnly) return;
   const field = event.target;
   if (!field || !field.name) return;
   const name = field.name;
@@ -1330,6 +1413,7 @@ function handleEquipmentEditorDraftInput(event) {
 }
 
 function resetEquipmentForm() {
+  if (state.equipmentDialogReadOnly) return;
   state.equipmentFormDirty = false;
   syncEquipmentForm();
   if (state.equipmentDialogOpen) {
@@ -1341,18 +1425,24 @@ function cancelEquipmentEdit() {
   const dialog = document.getElementById("equipmentEditorDialog");
   if (dialog?.open) {
     state.equipmentDialogSaved = false;
+    state.equipmentDialogReadOnly = false;
     dialog.close();
     return;
   }
   state.editingEquipmentId = null;
   state.equipmentFormDirty = false;
+  state.equipmentDialogReadOnly = false;
   state.equipmentDraftEquipmentId = null;
   state.equipmentDraftPlacements = [];
   state.equipmentDraftPointer = null;
   const message = document.getElementById("equipmentMessage");
-  message.dataset.preserve = "";
-  message.textContent = "已取消編輯。";
+  if (message) {
+    message.dataset.preserve = "";
+    message.textContent = "已取消編輯。";
+  }
   syncEquipmentForm();
+  renderEquipmentFloorplan();
+  renderDisabledEquipmentList();
 }
 
 function renderGantt(options = {}) {
@@ -1441,10 +1531,10 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
     const label = document.createElement("div");
     label.className = `gantt-equipment-label${variant === "bulletin" ? " bulletin-cell" : ""}`;
     label.innerHTML = `
-      <button type="button" class="equipment-zoom-btn">${escapeHtml(equipmentView.name)}</button>
+      <button type="button" class="equipment-zoom-btn" title="查看設備詳細資訊">${escapeHtml(equipmentView.name)}</button>
       <span>${escapeHtml(equipmentView.labelText)}</span>
     `;
-    label.querySelector(".equipment-zoom-btn").addEventListener("click", () => openEquipmentSchedule(equipment));
+    label.querySelector(".equipment-zoom-btn").addEventListener("click", () => startEditEquipment(equipment.id, { readOnly: true }));
 
     const lane = document.createElement("div");
     lane.className = `gantt-lane${variant === "bulletin" ? " bulletin-lane" : ""}`;
@@ -2291,8 +2381,8 @@ async function submitReservation(event) {
 
   try {
     const equipment = state.equipment.find((item) => Number(item.id) === equipmentId);
-    if (!equipment || !equipment.is_active || equipment.status !== "available") {
-      throw new Error("目前設備狀態不可預約。");
+    if (!equipment || !isEquipmentBookable(equipment)) {
+      throw new Error("目前設備狀態不可預約（僅維修中與停用設備無法預約）。");
     }
     if (isTruthyFlag(equipment.requires_test_condition) && !String(payload.test_condition || "").trim()) {
       throw new Error("此設備預約時必須填寫測試條件。");
@@ -3293,6 +3383,13 @@ function isEquipmentDisabled(equipment) {
   return hasActiveFlag && !isTruthyFlag(activeFlag);
 }
 
+function isEquipmentBookable(equipment) {
+  if (!equipment) return false;
+  if (isEquipmentDisabled(equipment)) return false;
+  if (equipment.status === "maintenance") return false;
+  return equipment.status === "available" || equipment.status === "validation";
+}
+
 function getAllFloorplanPlacementsForRender() {
   const placementMap = new Map(
     clonePlacements(state.floorplanPlacements).map((item) => [Number(item.equipment_id), item]),
@@ -3845,14 +3942,19 @@ function renderEquipmentEditorFloorplan() {
       : state.equipment.find((candidate) => Number(candidate.id) === Number(item.equipment_id)) || { id: item.equipment_id };
     const labelName = getFloorplanDisplayName(referenceEquipment, `Equipment #${item.equipment_id}`);
     const fullName = referenceEquipment.name || labelName;
-    const handles = isSelected
+    const isEditable = isSelected && !state.equipmentDialogReadOnly;
+    const handles = isEditable
       ? ["nw", "ne", "sw", "se"].map((direction) => `<span class="floorplan-resize-handle" data-resize="${direction}"></span>`).join("")
       : "";
+    const deviceClass = [
+      getFloorplanDeviceClassName(referenceEquipment, { selected: isSelected, editing: isEditable }),
+      isSelected ? "is-target-device active" : "is-locked is-dimmed-other",
+    ].filter(Boolean).join(" ");
     return `
-      <button type="button" class="${escapeHtml(`${getFloorplanDeviceClassName(referenceEquipment, { selected: isSelected, editing: isSelected })}${isSelected ? "" : " is-locked"}`)}"
-        data-equipment-id="${escapeHtml(item.equipment_id)}" data-location-state="${escapeHtml(item.location_state)}" data-editable="${escapeHtml(String(isSelected))}"
+      <button type="button" class="${escapeHtml(deviceClass)}"
+        data-equipment-id="${escapeHtml(item.equipment_id)}" data-location-state="${escapeHtml(item.location_state)}" data-editable="${escapeHtml(String(isEditable))}"
         style="left:${escapeHtml(item.x_percent)}%;top:${escapeHtml(item.y_percent)}%;width:${escapeHtml(item.width_percent)}%;height:${escapeHtml(item.height_percent)}%;"
-        aria-pressed="${escapeHtml(String(isSelected))}" aria-disabled="${escapeHtml(String(!isSelected))}"
+        aria-pressed="${escapeHtml(String(isSelected))}" aria-disabled="${escapeHtml(String(!isEditable))}"
         aria-label="${escapeHtml(`${labelName} / ${fullName}`)}" title="${escapeHtml(fullName)}" tabindex="${escapeHtml(isSelected ? "0" : "-1")}">
         <span class="state-dot" aria-hidden="true"></span><span class="floorplan-device-label">${escapeHtml(labelName)}</span>${handles}
       </button>
@@ -3861,11 +3963,13 @@ function renderEquipmentEditorFloorplan() {
   meta.textContent = isEquipmentDisabled(equipment)
     ? `${equipment.name || "-"} 目前為停用，不顯示於平面圖；恢復狀態後會沿用此定位。`
     : `${equipment.name || "-"}: ${placement.x_percent.toFixed(2)}%, ${placement.y_percent.toFixed(2)}% / ${placement.width_percent.toFixed(2)}% × ${placement.height_percent.toFixed(2)}%`;
-  overlay.querySelector('[data-editable="true"]')?.addEventListener("pointerdown", startEquipmentDraftPointer);
+  if (!state.equipmentDialogReadOnly) {
+    overlay.querySelector('[data-editable="true"]')?.addEventListener("pointerdown", startEquipmentDraftPointer);
+  }
 }
 
 function startEquipmentDraftPointer(event) {
-  if (!state.equipmentDialogOpen || event.currentTarget?.dataset?.editable !== "true") return;
+  if (!state.equipmentDialogOpen || state.equipmentDialogReadOnly || event.currentTarget?.dataset?.editable !== "true") return;
   const canvas = document.getElementById("equipmentDialogFloorplanCanvas");
   const placement = getEquipmentDraftPlacement();
   if (!canvas || !placement) return;
@@ -3912,11 +4016,13 @@ function handleEquipmentDialogCancel(event) {
 function handleEquipmentDialogClose() {
   state.equipmentDialogOpen = false;
   state.equipmentDialogSaved = false;
+  state.equipmentDialogReadOnly = false;
   state.editingEquipmentId = null;
   state.equipmentFormDirty = false;
   state.equipmentDraftEquipmentId = null;
   state.equipmentDraftPlacements = [];
   state.equipmentDraftPointer = null;
+  syncEquipmentForm();
 }
 
 async function saveEquipmentDraftPlacement(savedEquipmentId) {
@@ -3956,4 +4062,384 @@ async function saveEquipmentDraftPlacement(savedEquipmentId) {
     console.warn("Equipment dialog placement save failed, falling back to localStorage", error);
     persistLocal();
   }
+}
+
+/* --------------------------------------------------------------------------
+   設備稼動率統計與 Excel 匯出 (Equipment Utilization Analytics)
+   -------------------------------------------------------------------------- */
+
+function toISODateString(date) {
+  const d = new Date(date);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function getPresetDateRange(preset) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const day = now.getDate();
+
+  if (preset === "this-month") {
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0);
+    return { start: toISODateString(start), end: toISODateString(end) };
+  }
+  if (preset === "last-month") {
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 0);
+    return { start: toISODateString(start), end: toISODateString(end) };
+  }
+  if (preset === "this-week") {
+    const currentDay = now.getDay();
+    const distanceToMonday = (currentDay + 6) % 7;
+    const start = new Date(year, month, day - distanceToMonday);
+    const end = new Date(year, month, day - distanceToMonday + 6);
+    return { start: toISODateString(start), end: toISODateString(end) };
+  }
+  if (preset === "last-30") {
+    const start = new Date(year, month, day - 29);
+    const end = new Date(year, month, day);
+    return { start: toISODateString(start), end: toISODateString(end) };
+  }
+  if (preset === "last-90") {
+    const start = new Date(year, month, day - 89);
+    const end = new Date(year, month, day);
+    return { start: toISODateString(start), end: toISODateString(end) };
+  }
+  const start = new Date(year, month, 1);
+  const end = new Date(year, month + 1, 0);
+  return { start: toISODateString(start), end: toISODateString(end) };
+}
+
+function calculateEquipmentUtilization(startDateStr, endDateStr, options = {}) {
+  const start = new Date(startDateStr);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(endDateStr);
+  end.setHours(23, 59, 59, 999);
+
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+    return null;
+  }
+
+  const days = [];
+  let cur = new Date(start);
+  while (cur <= end) {
+    const dayStart = new Date(cur);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(cur);
+    dayEnd.setHours(23, 59, 59, 999);
+    days.push({
+      dateStr: toISODateString(dayStart),
+      startTime: dayStart.getTime(),
+      endTime: dayEnd.getTime(),
+    });
+    cur.setDate(cur.getDate() + 1);
+  }
+  const totalDays = days.length;
+
+  const validReservations = state.reservations.filter((r) => {
+    const status = getEffectiveReservationStatus(r);
+    if (status === "cancelled") return false;
+    const rStart = new Date(r.start_time).getTime();
+    const rEnd = new Date(r.end_time).getTime();
+    return Number.isFinite(rStart) && Number.isFinite(rEnd) && rStart <= end.getTime() && rEnd >= start.getTime();
+  });
+
+  const candidateEquipment = (options.equipmentId && options.equipmentId !== "all")
+    ? state.equipment.filter((eq) => String(eq.id) === String(options.equipmentId))
+    : state.equipment;
+
+  // 啟用中設備一律納入統計；停用設備若在選定區間內有專案紀錄（結案或進行中）則保留，無紀錄則不顯示
+  const targetEquipment = candidateEquipment.filter((eq) => {
+    if (!isEquipmentDisabled(eq)) {
+      return true;
+    }
+    return validReservations.some((r) => Number(r.equipment_id) === Number(eq.id));
+  });
+
+  const equipmentStats = targetEquipment.map((eq) => {
+    const eqReservations = validReservations.filter((r) => Number(r.equipment_id) === Number(eq.id));
+    
+    let activeDaysCount = 0;
+    let cumulativeProjectDays = 0;
+
+    days.forEach((day) => {
+      const dayReservations = eqReservations.filter((r) => {
+        const rStart = new Date(r.start_time).getTime();
+        const rEnd = new Date(r.end_time).getTime();
+        return rStart <= day.endTime && rEnd >= day.startTime;
+      });
+
+      const count = dayReservations.length;
+      if (count > 0) {
+        activeDaysCount += 1;
+        cumulativeProjectDays += count;
+      }
+    });
+
+    const baseRate = totalDays > 0 ? (activeDaysCount / totalDays) * 100 : 0;
+    const weightedRate = totalDays > 0 ? (cumulativeProjectDays / totalDays) * 100 : 0;
+
+    return {
+      equipment: eq,
+      totalDays,
+      activeDays: activeDaysCount,
+      baseRate,
+      cumulativeProjectDays,
+      weightedRate,
+      projectCount: eqReservations.length,
+    };
+  });
+
+  const totalActiveDays = equipmentStats.reduce((sum, item) => sum + item.activeDays, 0);
+  const totalCumulativeDays = equipmentStats.reduce((sum, item) => sum + item.cumulativeProjectDays, 0);
+  const totalProjectCount = new Set(
+    validReservations
+      .filter((r) => targetEquipment.some((eq) => Number(eq.id) === Number(r.equipment_id)))
+      .map((r) => r.id)
+  ).size;
+
+  const totalCapacityDays = equipmentStats.length * totalDays;
+  const avgBaseRate = totalCapacityDays > 0 ? (totalActiveDays / totalCapacityDays) * 100 : 0;
+  const avgWeightedRate = totalCapacityDays > 0 ? (totalCumulativeDays / totalCapacityDays) * 100 : 0;
+
+  return {
+    startDate: toISODateString(start),
+    endDate: toISODateString(end),
+    totalDays,
+    equipmentStats,
+    summary: {
+      avgBaseRate,
+      avgWeightedRate,
+      totalActiveDays,
+      totalCumulativeDays,
+      totalProjects: totalProjectCount,
+      equipmentCount: equipmentStats.length,
+    },
+  };
+}
+
+function renderAnalyticsEquipmentOptions() {
+  const select = document.getElementById("analyticsEquipmentSelect");
+  if (!select) return;
+  const previousValue = select.value || "all";
+  select.innerHTML = '<option value="all">全部設備 (所有機台)</option>';
+  
+  state.equipment.forEach((eq) => {
+    const opt = document.createElement("option");
+    opt.value = String(eq.id);
+    opt.textContent = `${eq.name} (${eq.category || "未分類"})${isEquipmentDisabled(eq) ? " [停用]" : ""}`;
+    select.appendChild(opt);
+  });
+  
+  if (state.equipment.some((eq) => String(eq.id) === previousValue)) {
+    select.value = previousValue;
+  } else {
+    select.value = "all";
+  }
+}
+
+function renderUtilizationAnalytics() {
+  const startInput = document.getElementById("analyticsStartDate");
+  const endInput = document.getElementById("analyticsEndDate");
+  const select = document.getElementById("analyticsEquipmentSelect");
+  if (!startInput || !endInput) return;
+
+  if (!startInput.value || !endInput.value) {
+    const defaultRange = getPresetDateRange(state.analyticsPreset || "this-month");
+    startInput.value = defaultRange.start;
+    endInput.value = defaultRange.end;
+  }
+
+  const equipmentId = select ? select.value : "all";
+  const data = calculateEquipmentUtilization(startInput.value, endInput.value, { equipmentId });
+  if (!data) return;
+
+  state.analyticsData = data;
+
+  // Render KPI Summary Cards
+  const periodDaysEl = document.getElementById("analyticsPeriodDays");
+  const periodRangeTextEl = document.getElementById("analyticsPeriodRangeText");
+  const avgBaseRateEl = document.getElementById("analyticsAvgBaseRate");
+  const avgWeightedRateEl = document.getElementById("analyticsAvgWeightedRate");
+  const totalProjectsEl = document.getElementById("analyticsTotalProjects");
+
+  if (periodDaysEl) periodDaysEl.textContent = `${data.totalDays} 天`;
+  if (periodRangeTextEl) periodRangeTextEl.textContent = `${data.startDate} 至 ${data.endDate}`;
+  if (avgBaseRateEl) avgBaseRateEl.textContent = `${data.summary.avgBaseRate.toFixed(1)}%`;
+  if (avgWeightedRateEl) avgWeightedRateEl.textContent = `${data.summary.avgWeightedRate.toFixed(1)}%`;
+  if (totalProjectsEl) totalProjectsEl.textContent = `${data.summary.totalProjects} 筆`;
+
+  // Render Equipment Table
+  const tbody = document.getElementById("analyticsTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  if (data.equipmentStats.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="table-empty">查無設備資料</td></tr>';
+    return;
+  }
+
+  data.equipmentStats.forEach((stat) => {
+    const tr = document.createElement("tr");
+    const eq = stat.equipment;
+    const isDisabled = isEquipmentDisabled(eq);
+
+    let weightedBadgeClass = "normal";
+    if (stat.weightedRate > 150) {
+      weightedBadgeClass = "heavy";
+    } else if (stat.weightedRate > 100) {
+      weightedBadgeClass = "highlight";
+    }
+
+    let progressFillClass = "";
+    if (stat.baseRate >= 100) {
+      progressFillClass = "full";
+    } else if (stat.baseRate >= 70) {
+      progressFillClass = "high";
+    }
+
+    const statusBadge = isDisabled
+      ? '<span class="status-badge state-offline">停用</span>'
+      : (eq.status === "validation"
+          ? '<span class="status-badge state-validation">驗證中</span>'
+          : (eq.status === "maintenance"
+              ? '<span class="status-badge state-maintenance">維修中</span>'
+              : '<span class="status-badge state-available">可預約</span>'));
+
+    tr.innerHTML = `
+      <td><strong>${escapeHtml(eq.name)}</strong></td>
+      <td><span class="category-tag">${escapeHtml(eq.category || "--")}</span></td>
+      <td class="center">${escapeHtml(String(eq.capacity || "1"))}</td>
+      <td class="center">${stat.totalDays} 天</td>
+      <td class="center"><strong>${stat.activeDays}</strong> 天</td>
+      <td>
+        <div class="rate-cell-group">
+          <span class="rate-percentage">${stat.baseRate.toFixed(1)}%</span>
+          <div class="rate-progress-bar" title="基礎稼動率：${stat.baseRate.toFixed(1)}%">
+            <div class="rate-progress-fill ${progressFillClass}" style="width: ${Math.min(stat.baseRate, 100)}%;"></div>
+          </div>
+        </div>
+      </td>
+      <td class="center"><strong>${stat.cumulativeProjectDays}</strong> 天</td>
+      <td class="center">
+        <span class="weighted-rate-badge ${weightedBadgeClass}" title="加權重複稼動率：${stat.weightedRate.toFixed(1)}%">
+          ${stat.weightedRate.toFixed(1)}%
+        </span>
+      </td>
+      <td class="center">${stat.projectCount} 筆</td>
+      <td class="center">${statusBadge}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function exportUtilizationToExcel() {
+  const data = state.analyticsData;
+  if (!data || !data.equipmentStats || data.equipmentStats.length === 0) {
+    alert("目前沒有可匯出的稼動率數據，請先選擇日期區間並計算。");
+    return;
+  }
+
+  const generatedTime = new Date().toLocaleString("zh-TW");
+  const filename = `設備稼動率統計報表_${data.startDate.replaceAll("-", "")}_${data.endDate.replaceAll("-", "")}.xlsx`;
+
+  if (typeof XLSX !== "undefined") {
+    const wsData = [
+      ["可靠度實驗室設備稼動率統計報表"],
+      [`統計區間：${data.startDate} 至 ${data.endDate}（共 ${data.totalDays} 天） | 產表時間：${generatedTime}`],
+      [`可靠度設備平均基礎稼動率：${data.summary.avgBaseRate.toFixed(1)}% | 可靠度設備平均重複加權稼動率：${data.summary.avgWeightedRate.toFixed(1)}% | 納入統計專案數：${data.summary.totalProjects} 筆 | 設備總數：${data.summary.equipmentCount} 台`],
+      [],
+      [
+        "設備名稱",
+        "類別",
+        "可重疊預約量",
+        "統計天數",
+        "基礎稼動天數",
+        "基礎稼動率",
+        "專案累計天數",
+        "重複加權稼動率",
+        "專案總筆數",
+        "設備狀態"
+      ]
+    ];
+
+    data.equipmentStats.forEach((stat) => {
+      const eq = stat.equipment;
+      const statusText = isEquipmentDisabled(eq)
+        ? "停用"
+        : (eq.status === "validation" ? "驗證中" : (eq.status === "maintenance" ? "維修中" : "可預約"));
+
+      wsData.push([
+        eq.name,
+        eq.category || "",
+        String(eq.capacity || "1"),
+        stat.totalDays,
+        stat.activeDays,
+        { t: "n", v: Number((stat.baseRate / 100).toFixed(4)), z: "0.0%" },
+        stat.cumulativeProjectDays,
+        { t: "n", v: Number((stat.weightedRate / 100).toFixed(4)), z: "0.0%" },
+        stat.projectCount,
+        statusText
+      ]);
+    });
+
+    wsData.push([
+      "總計 / 可靠度設備平均",
+      "",
+      "",
+      data.totalDays,
+      data.summary.totalActiveDays,
+      { t: "n", v: Number((data.summary.avgBaseRate / 100).toFixed(4)), z: "0.0%" },
+      data.summary.totalCumulativeDays,
+      { t: "n", v: Number((data.summary.avgWeightedRate / 100).toFixed(4)), z: "0.0%" },
+      data.summary.totalProjects,
+      "--"
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws["!cols"] = [
+      { wch: 22 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "設備稼動率統計");
+    XLSX.writeFile(wb, filename);
+    return;
+  }
+
+  // Fallback if XLSX library is not loaded
+  let csv = "\ufeff";
+  csv += `可靠度實驗室設備稼動率統計報表\n`;
+  csv += `統計區間：${data.startDate} 至 ${data.endDate}（共 ${data.totalDays} 天） | 產表時間：${generatedTime}\n`;
+  csv += `可靠度設備平均基礎稼動率：${data.summary.avgBaseRate.toFixed(1)}% | 可靠度設備平均重複加權稼動率：${data.summary.avgWeightedRate.toFixed(1)}% | 納入統計專案數：${data.summary.totalProjects} 筆 | 設備總數：${data.summary.equipmentCount} 台\n\n`;
+  csv += `設備名稱,類別,可重疊預約量,統計天數,基礎稼動天數,基礎稼動率,專案累計天數,重複加權稼動率,專案總筆數,設備狀態\n`;
+  data.equipmentStats.forEach((stat) => {
+    const eq = stat.equipment;
+    const statusText = isEquipmentDisabled(eq)
+      ? "停用"
+      : (eq.status === "validation" ? "驗證中" : (eq.status === "maintenance" ? "維修中" : "可預約"));
+    csv += `"${eq.name}","${eq.category || ""}","${eq.capacity || "1"}",${stat.totalDays},${stat.activeDays},${stat.baseRate.toFixed(1)}%,${stat.cumulativeProjectDays},${stat.weightedRate.toFixed(1)}%,${stat.projectCount},"${statusText}"\n`;
+  });
+  csv += `"總計 / 可靠度設備平均","","",${data.totalDays},${data.summary.totalActiveDays},${data.summary.avgBaseRate.toFixed(1)}%,${data.summary.totalCumulativeDays},${data.summary.avgWeightedRate.toFixed(1)}%,${data.summary.totalProjects},"--"\n`;
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename.replace(/\.xlsx$/, ".csv");
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
