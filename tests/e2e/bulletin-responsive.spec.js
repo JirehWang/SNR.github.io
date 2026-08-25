@@ -1,0 +1,390 @@
+const { test, expect } = require("@playwright/test");
+
+const ACTIVE_EQUIPMENT_COUNT = 21;
+
+const equipmentRows = Array.from({ length: ACTIVE_EQUIPMENT_COUNT }, (_, index) => ({
+  id: index + 1,
+  name: `Chamber ${String(index + 1).padStart(2, "0")}`,
+  category: "TEMP",
+  location: "1F",
+  status: "available",
+  capacity: "1",
+  is_active: true,
+  requires_test_condition: false,
+  label_name: `CH-${String(index + 1).padStart(2, "0")}`,
+  equipment_spec: "",
+})).concat({
+  id: 99,
+  name: "Offline chamber",
+  category: "TEMP",
+  location: "1F",
+  status: "offline",
+  capacity: "1",
+  is_active: false,
+  requires_test_condition: false,
+  label_name: "OFF-99",
+  equipment_spec: "",
+});
+
+async function mockSupabase(page) {
+  await page.route(/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2/, async (route) => {
+    await route.fulfill({
+      contentType: "application/javascript",
+      body: `
+        (() => {
+          const tableData = {
+            requester_directory: [],
+            equipment: ${JSON.stringify(equipmentRows)},
+            equipment_floorplan_placements: [],
+            reservations: [],
+          };
+
+          function createQuery(table) {
+            const query = {
+              select() { return query; },
+              order() { return query; },
+              eq() { return query; },
+              then(resolve, reject) {
+                return Promise.resolve({ data: tableData[table] || [], error: null }).then(resolve, reject);
+              },
+            };
+            return query;
+          }
+
+          window.supabase = {
+            createClient() {
+              return {
+                from(table) {
+                  return createQuery(table);
+                },
+              };
+            },
+          };
+        })();
+      `,
+    });
+  });
+}
+
+async function getBulletinMetrics(page) {
+  return page.evaluate(() => {
+    const wrap = document.querySelector(".bulletin-wrap");
+    const scale = document.querySelector(".bulletin-scale");
+    const chart = document.querySelector(".bulletin-chart");
+    const settings = document.querySelector("#bulletinSettings");
+    const settingsToggle = document.querySelector("#bulletinSettingsToggle");
+    const fullscreenButton = document.querySelector("#bulletinFullscreenBtn");
+    const settingsRect = settings.getBoundingClientRect();
+    const settingsToggleRect = settingsToggle.getBoundingClientRect();
+    const fullscreenButtonRect = fullscreenButton.getBoundingClientRect();
+    return {
+      dayCount: document.querySelectorAll(".bulletin-scale .gantt-day").length,
+      rowCount: document.querySelectorAll(".bulletin-row").length,
+      chartWidth: chart.getBoundingClientRect().width,
+      scaleStyleWidth: scale.style.width,
+      wrapClientHeight: wrap.clientHeight,
+      wrapScrollHeight: wrap.scrollHeight,
+      wrapClientWidth: wrap.clientWidth,
+      wrapScrollWidth: wrap.scrollWidth,
+      controlsVisible: settings.open,
+      settingsOpen: settings.open,
+      settingsExpanded: settingsToggle.getAttribute("aria-expanded"),
+      settingsHeight: settingsRect.height,
+      settingsToggleVisible: settingsToggleRect.width > 0 && settingsToggleRect.height > 0 && settingsToggleRect.top >= 0 && settingsToggleRect.bottom <= window.innerHeight,
+      settingsPanelVisible: settings.open,
+      fullscreenButtonVisible: fullscreenButtonRect.top >= 0 && fullscreenButtonRect.bottom <= window.innerHeight,
+      fullscreenElementId: document.fullscreenElement?.id || "",
+      monthLabel: document.querySelector("#bulletinMonthLabel").textContent,
+      rangeValue: document.querySelector("#bulletinRangeSelect").value,
+      rangeOptions: Array.from(document.querySelectorAll("#bulletinRangeSelect option")).map((option) => ({
+        value: option.value,
+        text: option.textContent,
+      })),
+      scrollIntervalValue: document.querySelector("#bulletinScrollInterval").value,
+      scrollDurationValue: document.querySelector("#bulletinScrollDuration").value,
+      dayTexts: Array.from(document.querySelectorAll(".bulletin-scale .gantt-day")).map((day) =>
+        Array.from(day.children).map((child) => child.textContent).join(" ")
+      ),
+      dayTextContained: Array.from(document.querySelectorAll(".bulletin-scale .gantt-day")).every((day) => {
+        const dayRect = day.getBoundingClientRect();
+        const dayStyle = window.getComputedStyle(day);
+        if (dayStyle.minWidth !== "0px" || dayStyle.overflow !== "hidden") return false;
+        return Array.from(day.children).every((child) => {
+          const childRect = child.getBoundingClientRect();
+          const childStyle = window.getComputedStyle(child);
+          return childStyle.minWidth === "0px"
+            && childStyle.overflow === "hidden"
+            && childStyle.whiteSpace === "nowrap"
+            && childRect.left >= dayRect.left - 1
+            && childRect.right <= dayRect.right + 1;
+        });
+      }),
+    };
+  });
+}
+
+async function getExpectedBulletinRange(page, dayCount, startOffset = 0) {
+  return page.evaluate(({ dayCount: days, startOffset: offset }) => {
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() + offset);
+    const end = new Date(start);
+    end.setDate(end.getDate() + days - 1);
+    const formatDate = (date) => `${date.getMonth() + 1}/${date.getDate()}`;
+    const formatDayText = (date) => `${dayNames[date.getDay()]} ${formatDate(date)}`;
+    return {
+      label: `${formatDate(start)} - ${formatDate(end)}`,
+      firstDayText: formatDayText(start),
+      lastDayText: formatDayText(end),
+    };
+  }, { dayCount, startOffset });
+}
+
+async function openMockedBulletin(page, viewport, options = {}) {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await mockSupabase(page);
+  if (options.clockTime) {
+    await page.clock.install({ time: options.clockTime });
+  }
+  await page.setViewportSize(viewport);
+  await page.goto("/?view=bulletin");
+  await expect(page.locator("#connectionBadge")).toHaveText("已連線");
+  await page.locator("#bulletinBoard").scrollIntoViewIfNeeded();
+  return pageErrors;
+}
+
+async function expandBulletinSettings(page) {
+  if (!(await page.locator("#bulletinSettings").evaluate((settings) => settings.open))) {
+    await page.locator("#bulletinSettingsToggle").click();
+  }
+  await expect.poll(async () => (await getBulletinMetrics(page)).settingsOpen).toBe(true);
+  await expect.poll(async () => (await getBulletinMetrics(page)).settingsExpanded).toBe("true");
+}
+
+async function collapseBulletinSettings(page) {
+  if (await page.locator("#bulletinSettings").evaluate((settings) => settings.open)) {
+    await page.locator("#bulletinSettingsToggle").click();
+  }
+  await expect.poll(async () => (await getBulletinMetrics(page)).settingsOpen).toBe(false);
+  await expect.poll(async () => (await getBulletinMetrics(page)).settingsExpanded).toBe("false");
+}
+
+async function selectBulletinRange(page, days) {
+  await expandBulletinSettings(page);
+  await page.locator("#bulletinRangeSelect").selectOption(String(days));
+}
+
+test("bulletin tablet landscape defaults to four weeks and keeps active equipment in a scrollable board", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 });
+
+  await expect(page.locator(".bulletin-scale .gantt-day")).toHaveCount(28);
+  await expect(page.locator(".bulletin-row")).toHaveCount(ACTIVE_EQUIPMENT_COUNT);
+
+  const metrics = await getBulletinMetrics(page);
+  const expected = await getExpectedBulletinRange(page, 28);
+  expect(metrics.settingsOpen).toBe(false);
+  expect(metrics.settingsExpanded).toBe("false");
+  expect(metrics.settingsToggleVisible).toBe(true);
+  expect(metrics.settingsPanelVisible).toBe(false);
+  expect(metrics.controlsVisible).toBe(false);
+  expect(metrics.settingsHeight).toBeLessThanOrEqual(44);
+  expect(metrics.rangeValue).toBe("28");
+  expect(metrics.rangeOptions).toEqual([
+    { value: "7", text: "1 週" },
+    { value: "14", text: "2 週" },
+    { value: "28", text: "4 週" },
+  ]);
+  expect(metrics.monthLabel).toBe(expected.label);
+  expect(metrics.dayTexts[0]).toBe(expected.firstDayText);
+  expect(metrics.dayTexts[metrics.dayTexts.length - 1]).toBe(expected.lastDayText);
+  expect(metrics.fullscreenButtonVisible).toBe(true);
+  expect(metrics.wrapScrollHeight).toBeGreaterThan(metrics.wrapClientHeight);
+  expect(metrics.wrapScrollWidth).toBeGreaterThanOrEqual(metrics.wrapClientWidth);
+
+  await expandBulletinSettings(page);
+  const expandedMetrics = await getBulletinMetrics(page);
+  expect(expandedMetrics.controlsVisible).toBe(true);
+  expect(expandedMetrics.settingsPanelVisible).toBe(true);
+  await expect(page.locator("#bulletinRangeSelect")).toBeVisible();
+  await expect(page.locator("#bulletinScrollInterval")).toBeVisible();
+  await expect(page.locator("#bulletinScrollDuration")).toBeVisible();
+
+  await collapseBulletinSettings(page);
+  const collapsedMetrics = await getBulletinMetrics(page);
+  expect(collapsedMetrics.controlsVisible).toBe(false);
+  expect(collapsedMetrics.settingsPanelVisible).toBe(false);
+  expect(collapsedMetrics.settingsToggleVisible).toBe(true);
+  expect(pageErrors).toEqual([]);
+});
+
+test("bulletin range select redraws one, two, and four week day headers without losing equipment rows", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 });
+
+  for (const days of [7, 14, 28]) {
+    await selectBulletinRange(page, days);
+    await expect(page.locator(".bulletin-scale .gantt-day")).toHaveCount(days);
+
+    const metrics = await getBulletinMetrics(page);
+    const expected = await getExpectedBulletinRange(page, days);
+    expect(metrics.rangeValue).toBe(String(days));
+    expect(metrics.monthLabel).toBe(expected.label);
+    expect(metrics.dayTexts[0]).toBe(expected.firstDayText);
+    expect(metrics.dayTexts[metrics.dayTexts.length - 1]).toBe(expected.lastDayText);
+    expect(metrics.rowCount).toBe(ACTIVE_EQUIPMENT_COUNT);
+  }
+
+  expect(pageErrors).toEqual([]);
+});
+
+test.describe("bulletin daily range synchronization", () => {
+  test.use({ timezoneId: "Asia/Taipei" });
+
+  test("bulletin range follows local midnight while preserving selected range and rows", async ({ page }) => {
+    const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 }, {
+      clockTime: new Date("2026-08-31T23:59:50+08:00"),
+    });
+    await selectBulletinRange(page, 14);
+    await collapseBulletinSettings(page);
+
+    const before = await getBulletinMetrics(page);
+    const beforeExpected = await getExpectedBulletinRange(page, 14);
+    expect(before.monthLabel).toBe(beforeExpected.label);
+    expect(before.dayTexts[0]).toBe(beforeExpected.firstDayText);
+    expect(before.rangeValue).toBe("14");
+    expect(before.rowCount).toBe(ACTIVE_EQUIPMENT_COUNT);
+
+    await page.clock.runFor(11_000);
+
+    const afterExpected = await getExpectedBulletinRange(page, 14);
+    await expect.poll(async () => (await getBulletinMetrics(page)).monthLabel).toBe(afterExpected.label);
+    const after = await getBulletinMetrics(page);
+    expect(after.monthLabel).toBe(afterExpected.label);
+    expect(after.dayTexts[0]).toBe(afterExpected.firstDayText);
+    expect(after.dayTexts[0]).not.toBe(before.dayTexts[0]);
+    expect(after.dayCount).toBe(14);
+    expect(after.rowCount).toBe(ACTIVE_EQUIPMENT_COUNT);
+    expect(after.rangeValue).toBe("14");
+    expect(after.settingsOpen).toBe(false);
+    expect(after.settingsExpanded).toBe("false");
+    expect(pageErrors).toEqual([]);
+  });
+
+  test("bulletin range synchronizes after returning to the foreground", async ({ page }) => {
+    const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 }, {
+      clockTime: new Date("2026-09-30T23:59:50+08:00"),
+    });
+    await selectBulletinRange(page, 7);
+    await collapseBulletinSettings(page);
+
+    const before = await getBulletinMetrics(page);
+    const beforeExpected = await getExpectedBulletinRange(page, 7);
+    expect(before.dayTexts[0]).toBe(beforeExpected.firstDayText);
+
+    await page.clock.setSystemTime(new Date("2026-10-01T00:00:05+08:00"));
+    await page.evaluate(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    const afterExpected = await getExpectedBulletinRange(page, 7);
+    await expect.poll(async () => (await getBulletinMetrics(page)).monthLabel).toBe(afterExpected.label);
+    const after = await getBulletinMetrics(page);
+    expect(after.monthLabel).toBe(afterExpected.label);
+    expect(after.dayTexts[0]).toBe(afterExpected.firstDayText);
+    expect(after.dayTexts[0]).not.toBe(before.dayTexts[0]);
+    expect(after.dayCount).toBe(7);
+    expect(after.rowCount).toBe(ACTIVE_EQUIPMENT_COUNT);
+    expect(after.rangeValue).toBe("7");
+    expect(after.settingsOpen).toBe(false);
+    expect(after.settingsExpanded).toBe("false");
+    expect(pageErrors).toEqual([]);
+  });
+});
+
+test("bulletin fullscreenchange rerenders stale tablet-width gantt columns", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 960, height: 540 });
+
+  const fullscreenEnabled = await page.evaluate(() => document.fullscreenEnabled);
+  test.skip(!fullscreenEnabled, "Fullscreen API is not available in this browser run.");
+
+  await expect(page.locator(".bulletin-row")).toHaveCount(ACTIVE_EQUIPMENT_COUNT);
+  await selectBulletinRange(page, 14);
+  await expect(page.locator(".bulletin-scale .gantt-day")).toHaveCount(14);
+  await collapseBulletinSettings(page);
+  await page.evaluate(() => {
+    const staleWidth = 2080;
+    const scale = document.querySelector(".bulletin-scale");
+    const chart = document.querySelector(".bulletin-chart");
+    scale.style.gridTemplateColumns = "220px repeat(14, 60px)";
+    scale.style.width = `${staleWidth}px`;
+    scale.style.minWidth = `${staleWidth}px`;
+    chart.style.width = `${staleWidth}px`;
+    chart.style.minWidth = `${staleWidth}px`;
+  });
+
+  await page.locator("#bulletinFullscreenBtn").click();
+  await expect.poll(async () => (await getBulletinMetrics(page)).fullscreenElementId).toBe("bulletinBoard");
+  await expect.poll(async () => (await getBulletinMetrics(page)).scaleStyleWidth).not.toBe("2080px");
+
+  const metrics = await getBulletinMetrics(page);
+  expect(metrics.dayCount).toBe(14);
+  expect(metrics.rangeValue).toBe("14");
+  expect(metrics.rowCount).toBe(ACTIVE_EQUIPMENT_COUNT);
+  expect(metrics.chartWidth).toBeLessThan(2080);
+  expect(metrics.settingsOpen).toBe(false);
+  expect(metrics.settingsToggleVisible).toBe(true);
+  expect(metrics.controlsVisible).toBe(false);
+  expect(metrics.fullscreenButtonVisible).toBe(true);
+  expect(metrics.dayTextContained).toBe(true);
+  expect(metrics.wrapScrollHeight).toBeGreaterThan(metrics.wrapClientHeight);
+  expect(metrics.chartWidth).toBeLessThanOrEqual(metrics.wrapClientWidth + 2);
+  expect(metrics.wrapScrollWidth).toBeLessThanOrEqual(metrics.wrapClientWidth + 2);
+  expect(pageErrors).toEqual([]);
+});
+
+test("bulletin segment navigation moves by the selected range and can return", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 });
+  await selectBulletinRange(page, 14);
+  await collapseBulletinSettings(page);
+
+  const initialLabel = (await getBulletinMetrics(page)).monthLabel;
+  const expectedNext = await getExpectedBulletinRange(page, 14, 14);
+  await page.locator("#bulletinNextMonth").click();
+  await expect.poll(async () => (await getBulletinMetrics(page)).monthLabel).toBe(expectedNext.label);
+  const nextLabel = (await getBulletinMetrics(page)).monthLabel;
+
+  await page.locator("#bulletinPrevMonth").click();
+  await expect.poll(async () => (await getBulletinMetrics(page)).monthLabel).toBe(initialLabel);
+
+  expect(nextLabel).not.toBe(initialLabel);
+  await expect(page.locator(".bulletin-scale .gantt-day")).toHaveCount(14);
+  await expect(page.locator(".bulletin-row")).toHaveCount(ACTIVE_EQUIPMENT_COUNT);
+  expect(pageErrors).toEqual([]);
+});
+
+test("bulletin scroll settings are applied and auto-scroll scheduling stays stable", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 960, height: 540 });
+
+  const fullscreenEnabled = await page.evaluate(() => document.fullscreenEnabled);
+  test.skip(!fullscreenEnabled, "Fullscreen API is not available in this browser run.");
+
+  await page.locator("#bulletinFullscreenBtn").click();
+  await expect.poll(async () => (await getBulletinMetrics(page)).fullscreenElementId).toBe("bulletinBoard");
+  await selectBulletinRange(page, 7);
+  await expect(page.locator(".bulletin-scale .gantt-day")).toHaveCount(7);
+
+  await page.locator("#bulletinScrollInterval").fill("7");
+  await page.locator("#bulletinScrollInterval").dispatchEvent("change");
+  await page.locator("#bulletinScrollDuration").fill("4");
+  await page.locator("#bulletinScrollDuration").dispatchEvent("change");
+
+  const metrics = await getBulletinMetrics(page);
+  expect(metrics.rangeValue).toBe("7");
+  expect(metrics.scrollIntervalValue).toBe("7");
+  expect(metrics.scrollDurationValue).toBe("4");
+  expect(metrics.settingsOpen).toBe(true);
+  expect(metrics.controlsVisible).toBe(true);
+  expect(metrics.wrapScrollHeight).toBeGreaterThan(metrics.wrapClientHeight);
+  expect(pageErrors).toEqual([]);
+});

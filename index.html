@@ -496,18 +496,13 @@
             <div class="section-title with-controls">
               <div>
                 <h2>設備使用公佈欄</h2>
-                <p>適合投影在電視牆的本週設備使用時程。</p>
+                <p>適合投影在電視牆的設備使用時程。</p>
               </div>
             <div class="week-controls">
-              <div class="date-navigation" aria-label="佈告欄月份導覽">
-                <button id="bulletinPrevMonth" type="button" class="icon-btn" title="上一個月" aria-label="上一個月">&#8249;</button>
+              <div class="date-navigation" aria-label="公佈欄日期區段導覽">
+                <button id="bulletinPrevMonth" type="button" class="icon-btn" title="上一段" aria-label="上一段">&#8249;</button>
                 <button id="bulletinMonthLabel" type="button" class="date-range-label" aria-live="polite"></button>
-                <button id="bulletinNextMonth" type="button" class="icon-btn" title="下一個月" aria-label="下一個月">&#8250;</button>
-              </div>
-              <div class="week-navigation" aria-label="佈告欄週次導覽">
-                <button id="bulletinPrevWeek" class="icon-btn" title="上一週" aria-label="上一週">&#8249;</button>
-                <span id="bulletinWeekLabel"></span>
-                <button id="bulletinNextWeek" class="icon-btn" title="下一週" aria-label="下一週">&#8250;</button>
+                <button id="bulletinNextMonth" type="button" class="icon-btn" title="下一段" aria-label="下一段">&#8250;</button>
               </div>
               <button id="openBulletinWindowBtn" type="button" class="secondary">另開公佈欄</button>
               <button id="bulletinFullscreenBtn" type="button">全螢幕</button>
@@ -516,16 +511,29 @@
           <div class="bulletin-meta">
             <span id="bulletinTimestamp">--</span>
           </div>
-          <div class="bulletin-controls" aria-label="公佈欄捲動設定">
-            <label>
-              捲動間隔（秒）
-              <input id="bulletinScrollInterval" type="number" min="5" max="300" step="5" value="30">
-            </label>
-            <label>
-              捲動時間（秒）
-              <input id="bulletinScrollDuration" type="number" min="1" max="30" step="1" value="1">
-            </label>
-          </div>
+          <details id="bulletinSettings" class="bulletin-settings">
+            <summary id="bulletinSettingsToggle" class="bulletin-settings-toggle" aria-controls="bulletinSettingsPanel" aria-expanded="false">顯示設定</summary>
+            <div id="bulletinSettingsPanel" class="bulletin-settings-panel">
+              <div class="bulletin-controls" aria-label="公佈欄捲動設定">
+                <label>
+                  顯示範圍
+                  <select id="bulletinRangeSelect" aria-label="公佈欄顯示範圍">
+                    <option value="7">1 週</option>
+                    <option value="14">2 週</option>
+                    <option value="28" selected>4 週</option>
+                  </select>
+                </label>
+                <label>
+                  捲動間隔（秒）
+                  <input id="bulletinScrollInterval" type="number" min="5" max="300" step="5" value="30">
+                </label>
+                <label>
+                  捲動時間（秒）
+                  <input id="bulletinScrollDuration" type="number" min="1" max="30" step="1" value="1">
+                </label>
+              </div>
+            </div>
+          </details>
           <div class="gantt-wrap bulletin-wrap">
             <div id="bulletinScale" class="gantt-scale bulletin-scale"></div>
             <div id="bulletinChart" class="gantt-chart bulletin-chart"></div>

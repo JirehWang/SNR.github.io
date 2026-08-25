@@ -209,6 +209,11 @@ const SCHEDULE_EXTENSION_COOLDOWN_MS = 300;
 const GANTT_VIEWPORT_RELAYOUT_DEBOUNCE_MS = 180;
 const GANTT_DRAG_THRESHOLD_PX = 6;
 const GANTT_DISPLAY_DAYS = 31;
+const GANTT_EQUIPMENT_COLUMN_WIDTH = 220;
+const BULLETIN_MIN_DAY_WIDTH = 24;
+const BULLETIN_MIN_EQUIPMENT_COLUMN_WIDTH = 136;
+const BULLETIN_RANGE_DAY_OPTIONS = [7, 14, 28];
+const BULLETIN_DEFAULT_RANGE_DAYS = 28;
 
 const FLOORPLAN_STORAGE_KEY = "snr.floorplan.placements.v1";
 const EQUIPMENT_DRAFT_ID = -1;
@@ -241,7 +246,9 @@ const state = {
   reservations: [],
   requesters: [],
   weekStart: startOfWeek(new Date()),
-  bulletinMonthStart: startOfMonth(new Date()),
+  bulletinRangeStart: startOfDay(new Date()),
+  bulletinRangeDays: BULLETIN_DEFAULT_RANGE_DAYS,
+  bulletinRangeSyncTimerId: null,
   scheduleStart: startOfDay(new Date()),
   scheduleRangeStart: addMonths(startOfDay(new Date()), -SCHEDULE_EXTENSION_MONTHS),
   scheduleRangeEnd: addMonths(addMonths(startOfDay(new Date()), 1), SCHEDULE_EXTENSION_MONTHS),
@@ -319,6 +326,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initializeBulletinControls();
   setDefaultTimes();
   renderAll();
+  scheduleBulletinRangeSync();
   await connectAndLoad();
   window.setInterval(() => {
     if (state.client) {
@@ -331,12 +339,15 @@ function bindEvents() {
   document.getElementById("refreshBtn").addEventListener("click", () => connectAndLoad(true));
   document.getElementById("bulletinPrevMonth").addEventListener("click", () => moveBulletinMonth(-1));
   document.getElementById("bulletinNextMonth").addEventListener("click", () => moveBulletinMonth(1));
+  document.getElementById("bulletinRangeSelect").addEventListener("change", updateBulletinRangeSelection);
   document.getElementById("bulletinFullscreenBtn").addEventListener("click", openBulletinFullscreen);
   document.getElementById("openBulletinWindowBtn").addEventListener("click", openBulletinWindow);
   document.getElementById("bulletinScrollInterval").addEventListener("change", updateBulletinScrollSettings);
   document.getElementById("bulletinScrollDuration").addEventListener("change", updateBulletinScrollSettings);
   window.addEventListener("resize", handleBulletinViewportChange);
   document.addEventListener("fullscreenchange", handleBulletinFullscreenChange);
+  document.addEventListener("visibilitychange", handleBulletinVisibilityChange);
+  bindBulletinSettingsToggle();
 
   document.getElementById("reservationForm").addEventListener("submit", submitReservation);
   document.querySelector("#reservationForm select[name='equipment_id']").addEventListener("change", syncReservationEquipmentState);
@@ -448,10 +459,54 @@ function hydrateViewFromLocation() {
 }
 
 function initializeBulletinControls() {
+  const rangeSelect = document.getElementById("bulletinRangeSelect");
   const intervalInput = document.getElementById("bulletinScrollInterval");
   const durationInput = document.getElementById("bulletinScrollDuration");
+  rangeSelect.value = String(getBulletinRangeDays());
   intervalInput.value = String(state.bulletinScroll.intervalSeconds);
   durationInput.value = String(state.bulletinScroll.durationSeconds);
+}
+
+function bindBulletinSettingsToggle() {
+  const settings = document.getElementById("bulletinSettings");
+  const toggle = document.getElementById("bulletinSettingsToggle");
+  if (!settings || !toggle) return;
+  const syncExpandedState = () => {
+    toggle.setAttribute("aria-expanded", settings.open ? "true" : "false");
+  };
+  syncExpandedState();
+  settings.addEventListener("toggle", syncExpandedState);
+}
+
+function syncBulletinRangeToToday() {
+  const today = startOfDay(new Date());
+  const currentStart = startOfDay(state.bulletinRangeStart || today);
+  if (currentStart.getTime() === today.getTime()) return false;
+
+  state.bulletinRangeStart = today;
+  relayoutBulletinBoard({ resetAutoScroll: true });
+  return true;
+}
+
+function scheduleBulletinRangeSync() {
+  if (state.bulletinRangeSyncTimerId !== null) {
+    window.clearTimeout(state.bulletinRangeSyncTimerId);
+  }
+
+  const now = new Date();
+  const nextMidnight = startOfDay(addDays(now, 1));
+  const delay = Math.max(nextMidnight.getTime() - now.getTime(), 1);
+  state.bulletinRangeSyncTimerId = window.setTimeout(() => {
+    state.bulletinRangeSyncTimerId = null;
+    syncBulletinRangeToToday();
+    scheduleBulletinRangeSync();
+  }, delay);
+}
+
+function handleBulletinVisibilityChange() {
+  if (document.visibilityState !== "visible") return;
+  syncBulletinRangeToToday();
+  scheduleBulletinRangeSync();
 }
 
 function initializeSupabase() {
@@ -864,6 +919,8 @@ function setActiveView(viewName) {
 }
 
 function renderViewState() {
+  document.body?.classList.toggle("bulletin-view-active", state.activeView === "bulletin");
+
   document.querySelectorAll("[data-view-target]").forEach((button) => {
     const isActive = button.dataset.viewTarget === state.activeView;
     button.classList.toggle("active", isActive);
@@ -944,6 +1001,21 @@ function getFixedGanttDisplayRange(startDate = new Date()) {
 
 function getMonthlyScheduleRange(startDate = new Date()) {
   return getFixedGanttDisplayRange(startDate);
+}
+
+function getBulletinRangeDays(value = state.bulletinRangeDays) {
+  const parsed = Number(value);
+  return BULLETIN_RANGE_DAY_OPTIONS.includes(parsed) ? parsed : BULLETIN_DEFAULT_RANGE_DAYS;
+}
+
+function getBulletinScheduleRange(startDate = state.bulletinRangeStart, dayCount = state.bulletinRangeDays) {
+  const start = startOfDay(startDate || new Date());
+  const days = getBulletinRangeDays(dayCount);
+  return {
+    start,
+    end: addDays(start, days),
+    dayCount: days,
+  };
 }
 
 function getMainScheduleRange() {
@@ -1073,8 +1145,40 @@ function scheduleMainGanttViewportRelayout(
 }
 
 function getGanttDisplayDayWidth(wrap) {
-  const availableWidth = Math.max((wrap?.clientWidth || 1280) - 220, 760);
-  return Math.max(Math.floor(availableWidth / GANTT_DISPLAY_DAYS), 24);
+  return getGanttDisplayGeometry(wrap).dayWidth;
+}
+
+function getGanttDisplayGeometry(wrap, options = {}) {
+  const isBulletin = options.variant === "bulletin";
+  const displayDays = isBulletin ? getBulletinRangeDays(options.dayCount) : GANTT_DISPLAY_DAYS;
+  const wrapWidth = Math.max(
+    Number(wrap?.clientWidth) || 0,
+    Math.floor(Number(wrap?.getBoundingClientRect?.().width) || 0),
+  );
+  const fullscreenWidth = document.fullscreenElement?.contains?.(wrap)
+    ? Math.floor(Number(window.visualViewport?.width || window.innerWidth) || 0)
+    : 0;
+  const containerWidth = isBulletin
+    ? (wrapWidth || fullscreenWidth || 1280)
+    : (Math.max(wrapWidth, fullscreenWidth) || 1280);
+  if (!isBulletin) {
+    const availableWidth = Math.max(containerWidth - GANTT_EQUIPMENT_COLUMN_WIDTH, 760);
+    return {
+      dayWidth: Math.max(Math.floor(availableWidth / displayDays), BULLETIN_MIN_DAY_WIDTH),
+      equipmentColumnWidth: GANTT_EQUIPMENT_COLUMN_WIDTH,
+    };
+  }
+
+  const fittedEquipmentWidth = Math.floor(containerWidth - displayDays * BULLETIN_MIN_DAY_WIDTH);
+  const equipmentColumnWidth = Math.min(
+    GANTT_EQUIPMENT_COLUMN_WIDTH,
+    Math.max(fittedEquipmentWidth, BULLETIN_MIN_EQUIPMENT_COLUMN_WIDTH),
+  );
+  const availableWidth = Math.max(containerWidth - equipmentColumnWidth, displayDays * BULLETIN_MIN_DAY_WIDTH);
+  return {
+    dayWidth: Math.max(Math.floor(availableWidth / displayDays), BULLETIN_MIN_DAY_WIDTH),
+    equipmentColumnWidth,
+  };
 }
 
 function getDateAtMainScheduleScroll(wrap = document.querySelector(".gantt-schedule-wrap")) {
@@ -1569,7 +1673,7 @@ function renderGantt(options = {}) {
 }
 
 function renderBulletinBoard() {
-  const bulletinRange = getMonthlyScheduleRange(state.bulletinMonthStart);
+  const bulletinRange = getBulletinScheduleRange();
   renderGanttSurface({
     scaleId: "bulletinScale",
     chartId: "bulletinChart",
@@ -1592,14 +1696,15 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
   }
 
   if (!scale || !chart) return;
-  const dayWidth = variant === "default"
-    ? getMainScheduleDayWidth()
-    : getGanttDisplayDayWidth(document.querySelector(".bulletin-wrap"));
-  const minWidth = 220 + range.dayCount * dayWidth;
-  scale.style.gridTemplateColumns = `220px repeat(${range.dayCount}, ${dayWidth}px)`;
+  const geometry = variant === "default"
+    ? getGanttDisplayGeometry(document.querySelector(".gantt-schedule-wrap"))
+    : getGanttDisplayGeometry(document.querySelector(".bulletin-wrap"), { variant: "bulletin", dayCount: range.dayCount });
+  const { dayWidth, equipmentColumnWidth } = geometry;
+  const minWidth = equipmentColumnWidth + range.dayCount * dayWidth;
+  scale.style.gridTemplateColumns = `${equipmentColumnWidth}px repeat(${range.dayCount}, ${dayWidth}px)`;
   scale.style.width = `${minWidth}px`;
   scale.style.minWidth = `${minWidth}px`;
-  scale.style.setProperty("--gantt-year-label-left", "calc(220px + 8px)");
+  scale.style.setProperty("--gantt-year-label-left", `calc(${equipmentColumnWidth}px + 8px)`);
   scale.style.setProperty("--gantt-year-label-right", "8px");
   chart.style.width = `${minWidth}px`;
   chart.style.minWidth = `${minWidth}px`;
@@ -1615,7 +1720,11 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
     const date = addDays(range.start, offset);
     const tick = document.createElement("div");
     tick.className = `gantt-day${variant === "bulletin" ? " bulletin-cell" : ""}`;
-    tick.textContent = `${dayNames[date.getDay()]} ${formatDate(date)}`;
+    if (variant === "bulletin") {
+      tick.innerHTML = `<span>${dayNames[date.getDay()].replace(".", "")}</span><span>${formatDate(date)}</span>`;
+    } else {
+      tick.textContent = `${dayNames[date.getDay()]} ${formatDate(date)}`;
+    }
     scale.appendChild(tick);
   }
 
@@ -1632,6 +1741,7 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
     const equipmentView = getEquipmentViewModel(equipment);
     const row = document.createElement("div");
     row.className = `gantt-row${variant === "bulletin" ? " bulletin-row" : ""}`;
+    row.style.gridTemplateColumns = `${equipmentColumnWidth}px minmax(0, 1fr)`;
 
     const label = document.createElement("div");
     label.className = `gantt-equipment-label${variant === "bulletin" ? " bulletin-cell" : ""}`;
@@ -3003,8 +3113,17 @@ function moveWeek(days) {
 }
 
 function moveBulletinMonth(direction) {
-  state.bulletinMonthStart = startOfMonth(addMonths(state.bulletinMonthStart, direction));
-  renderBulletinBoard();
+  const days = getBulletinRangeDays();
+  state.bulletinRangeStart = addDays(state.bulletinRangeStart || new Date(), direction * days);
+  relayoutBulletinBoard({ resetAutoScroll: true });
+}
+
+function updateBulletinRangeSelection() {
+  const rangeSelect = document.getElementById("bulletinRangeSelect");
+  state.bulletinRangeDays = getBulletinRangeDays(rangeSelect.value);
+  rangeSelect.value = String(state.bulletinRangeDays);
+  state.bulletinRangeStart = startOfDay(state.bulletinRangeStart || new Date());
+  relayoutBulletinBoard({ resetAutoScroll: true });
 }
 
 function updateBulletinScrollSettings() {
@@ -3045,29 +3164,36 @@ function renderReservationRequesterCategory() {
 }
 
 function handleBulletinViewportChange() {
-  const previousScrollTop = document.querySelector(".bulletin-wrap")?.scrollTop || 0;
+  relayoutBulletinBoard({ preserveScroll: true });
+}
+
+function relayoutBulletinBoard({ preserveScroll = false, resetAutoScroll = false } = {}) {
+  const previousScrollTop = preserveScroll
+    ? document.querySelector(".bulletin-wrap")?.scrollTop || 0
+    : 0;
   renderBulletinBoard();
   const wrap = document.querySelector(".bulletin-wrap");
-  if (document.fullscreenElement) {
+  if (!wrap) return;
+  if (preserveScroll && !resetAutoScroll) {
     wrap.scrollTop = Math.min(previousScrollTop, Math.max(wrap.scrollHeight - wrap.clientHeight, 0));
-    scheduleBulletinAutoScroll({ resetPosition: false });
+  }
+  if (document.fullscreenElement) {
+    scheduleBulletinAutoScroll({ resetPosition: resetAutoScroll });
   } else {
-    stopBulletinAutoScroll();
+    stopBulletinAutoScroll({ resetPosition: resetAutoScroll });
   }
 }
 
 function handleBulletinFullscreenChange() {
-  window.setTimeout(() => {
-    if (document.fullscreenElement) {
-      scheduleBulletinAutoScroll({ resetPosition: true });
-    } else {
-      stopBulletinAutoScroll({ resetPosition: true });
-    }
-  }, 0);
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      relayoutBulletinBoard({ resetAutoScroll: true });
+    });
+  });
 }
 
-function scheduleBulletinAutoScroll() {
-  return scheduleBulletinAutoScrollWithOptions();
+function scheduleBulletinAutoScroll(options = {}) {
+  return scheduleBulletinAutoScrollWithOptions(options);
 }
 
 function scheduleBulletinAutoScrollWithOptions(options = {}) {

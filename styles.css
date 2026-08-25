@@ -116,6 +116,11 @@ button.ghost {
   margin: 0 auto;
 }
 
+.bulletin-view-active .layout {
+  width: 100%;
+  max-width: none;
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -324,7 +329,14 @@ button.ghost {
 }
 
 .bulletin-panel {
+  min-width: 0;
   padding: 24px;
+}
+
+.bulletin-view-active .bulletin-panel,
+:fullscreen .bulletin-panel {
+  display: flex;
+  flex-direction: column;
 }
 
 .bulletin-meta {
@@ -333,11 +345,41 @@ button.ghost {
   font-size: 13px;
 }
 
+.bulletin-settings {
+  margin: 0 0 14px;
+}
+
+.bulletin-settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 12px;
+  color: var(--brand-dark);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+}
+
+.bulletin-settings-toggle:hover,
+.bulletin-settings-toggle:focus-visible {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.bulletin-settings-toggle:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
 .bulletin-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin: 0 0 14px;
+  margin: 12px 0 0;
 }
 
 .bulletin-controls label {
@@ -816,6 +858,7 @@ textarea:focus {
 }
 
 .bulletin-wrap {
+  flex: 1 1 auto;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -854,7 +897,7 @@ textarea:focus {
 .bulletin-scale,
 .bulletin-chart,
 .bulletin-wrap .gantt-placeholder {
-  min-width: 1320px;
+  min-width: 0;
 }
 
 .gantt-row {
@@ -924,6 +967,31 @@ textarea:focus {
   text-align: center;
   font-size: 12px;
   font-weight: 800;
+}
+
+.bulletin-scale .gantt-day {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 10px 1px;
+  font-size: 10px;
+  line-height: 1.2;
+  word-break: keep-all;
+}
+
+.bulletin-scale .gantt-day > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulletin-scale .gantt-equipment-spacer,
+.bulletin-chart .gantt-equipment-label {
+  padding-right: 8px;
+  padding-left: 8px;
 }
 
 .gantt-equipment-label {
@@ -1657,16 +1725,20 @@ th {
 }
 
 :fullscreen .bulletin-panel {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
   min-height: 100vh;
   border-radius: 0;
   border: 0;
   padding: 24px;
   background: #f8fbff;
+  overflow: hidden;
 }
 
 :fullscreen .bulletin-wrap {
-  height: calc(100vh - 140px);
-  min-height: 240px;
+  height: auto;
+  min-height: 0;
 }
 
 @media (max-width: 1080px) {
