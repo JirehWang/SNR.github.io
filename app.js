@@ -205,6 +205,8 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const AUTO_REFRESH_MS = 60000;
 const SCHEDULE_EXTENSION_MONTHS = 6;
+const SCHEDULE_EXTENSION_COOLDOWN_MS = 300;
+const GANTT_VIEWPORT_RELAYOUT_DEBOUNCE_MS = 180;
 const GANTT_DRAG_THRESHOLD_PX = 6;
 const GANTT_DISPLAY_DAYS = 31;
 
@@ -244,8 +246,13 @@ const state = {
   scheduleRangeStart: addMonths(startOfDay(new Date()), -SCHEDULE_EXTENSION_MONTHS),
   scheduleRangeEnd: addMonths(addMonths(startOfDay(new Date()), 1), SCHEDULE_EXTENSION_MONTHS),
   scheduleFocusDate: startOfDay(new Date()),
+  mainGanttViewport: {
+    key: "",
+    timerId: null,
+  },
   ganttDrag: null,
   isExtendingSchedule: false,
+  lastScheduleExtensionAt: 0,
   activeView: "reservation",
   reservationList: {
     status: "open",
@@ -976,6 +983,95 @@ function getMainScheduleDayWidth() {
   return getGanttDisplayDayWidth(wrap);
 }
 
+function getMainGanttViewportBounds(wrap = document.querySelector(".gantt-schedule-wrap")) {
+  const wrapRect = wrap?.getBoundingClientRect?.() || { left: 0 };
+  const firstLabel = document.querySelector("#ganttChart .gantt-equipment-label");
+  const scaleSpacer = document.querySelector("#ganttScale .gantt-equipment-spacer");
+  const labelRect = (firstLabel || scaleSpacer)?.getBoundingClientRect?.();
+  const wrapLeft = Number(wrapRect.left) || 0;
+  const contentLeft = wrapLeft + Math.max(Number(wrap?.clientLeft) || 0, 0);
+  const leftBoundary = Number.isFinite(labelRect?.right) ? labelRect.right : contentLeft + 220;
+  const rightBoundary = contentLeft + Math.max(Number(wrap?.clientWidth) || 0, 0);
+  return {
+    wrapLeft,
+    leftBoundary,
+    rightBoundary,
+  };
+}
+
+function getMainGanttViewportDateRange(
+  wrap = document.querySelector(".gantt-schedule-wrap"),
+  scheduleRange = getMainScheduleRange(),
+) {
+  const dayWidth = getMainScheduleDayWidth();
+  const scheduleStart = startOfDay(scheduleRange.start);
+  const dayCount = Math.max(Number(scheduleRange.dayCount) || 1, 1);
+  const { wrapLeft, leftBoundary, rightBoundary } = getMainGanttViewportBounds(wrap);
+  const timelineOrigin = leftBoundary - wrapLeft;
+  const scrollLeft = Math.max(Number(wrap?.scrollLeft) || 0, 0);
+  const leftPixel = scrollLeft + leftBoundary - wrapLeft;
+  const rightPixel = scrollLeft + rightBoundary - wrapLeft;
+  const firstDay = Math.min(
+    Math.max(Math.floor((leftPixel - timelineOrigin) / dayWidth), 0),
+    dayCount - 1,
+  );
+  const lastDayExclusive = Math.min(
+    Math.max(Math.ceil((rightPixel - timelineOrigin) / dayWidth), firstDay + 1),
+    dayCount,
+  );
+  return {
+    start: addDays(scheduleStart, firstDay),
+    end: addDays(scheduleStart, lastDayExclusive),
+    dayCount: lastDayExclusive - firstDay,
+  };
+}
+
+function getMainGanttViewportKey(wrap = document.querySelector(".gantt-schedule-wrap")) {
+  const range = getMainGanttViewportDateRange(wrap, getMainScheduleRange());
+  return `${range.start.getTime()}:${range.end.getTime()}`;
+}
+
+function scheduleMainGanttViewportRelayout(
+  wrap = document.querySelector(".gantt-schedule-wrap"),
+  { immediate = false } = {},
+) {
+  if (!wrap || state.isExtendingSchedule) return;
+  if (state.mainGanttViewport.timerId !== null) {
+    window.clearTimeout(state.mainGanttViewport.timerId);
+    state.mainGanttViewport.timerId = null;
+  }
+
+  const run = () => {
+    state.mainGanttViewport.timerId = null;
+    const currentWrap = document.querySelector(".gantt-schedule-wrap");
+    if (!currentWrap || !document.querySelector("#ganttChart .gantt-row")) return;
+    const currentKey = getMainGanttViewportKey(currentWrap);
+    const shouldRelayout = currentKey !== state.mainGanttViewport.key;
+    if (shouldRelayout) {
+      const scrollLeft = currentWrap.scrollLeft;
+      const scrollTop = currentWrap.scrollTop;
+      renderGanttSurface({
+        scaleId: "ganttScale",
+        chartId: "ganttChart",
+        labelId: "scheduleRangeLabel",
+        variant: "default",
+        range: getMainScheduleRange(),
+      });
+      currentWrap.scrollLeft = scrollLeft;
+      currentWrap.scrollTop = scrollTop;
+      state.mainGanttViewport.key = currentKey;
+      updateMainScheduleLabel();
+    }
+    syncMainGanttBarInfo();
+  };
+
+  if (immediate) {
+    run();
+    return;
+  }
+  state.mainGanttViewport.timerId = window.setTimeout(run, GANTT_VIEWPORT_RELAYOUT_DEBOUNCE_MS);
+}
+
 function getGanttDisplayDayWidth(wrap) {
   const availableWidth = Math.max((wrap?.clientWidth || 1280) - 220, 760);
   return Math.max(Math.floor(availableWidth / GANTT_DISPLAY_DAYS), 24);
@@ -1000,6 +1096,7 @@ function scrollMainScheduleToDate(date) {
   state.scheduleFocusDate = targetDate;
   updateMainScheduleLabel();
   syncMainGanttBarInfo();
+  scheduleMainGanttViewportRelayout(wrap, { immediate: true });
 }
 
 function ensureMainScheduleRangeForDate(date) {
@@ -1024,6 +1121,10 @@ function moveMainScheduleMonth(direction) {
 }
 
 function extendMainScheduleRange(direction, anchorDate = null) {
+  const now = Date.now();
+  if (state.isExtendingSchedule || now - state.lastScheduleExtensionAt < SCHEDULE_EXTENSION_COOLDOWN_MS) return;
+  state.lastScheduleExtensionAt = now;
+
   const wrap = document.querySelector(".gantt-schedule-wrap");
   const scrollAnchor = anchorDate || getDateAtMainScheduleScroll(wrap);
   if (direction < 0) {
@@ -1036,6 +1137,7 @@ function extendMainScheduleRange(direction, anchorDate = null) {
   window.requestAnimationFrame(() => {
     scrollMainScheduleToDate(scrollAnchor);
     state.isExtendingSchedule = false;
+    scheduleMainGanttViewportRelayout(wrap, { immediate: true });
   });
 }
 
@@ -1052,17 +1154,9 @@ function handleMainGanttScroll(event) {
     extendMainScheduleRange(1, getDateAtMainScheduleScroll(wrap));
     return;
   }
-  const previousFocus = getMainScheduleLabelRange();
   state.scheduleFocusDate = getDateAtMainScheduleScroll(wrap);
-  const nextFocus = getMainScheduleLabelRange();
-  const crossedMonth = previousFocus.start.getFullYear() !== nextFocus.start.getFullYear()
-    || previousFocus.start.getMonth() !== nextFocus.start.getMonth();
-  if (crossedMonth) {
-    renderGantt({ scrollDate: state.scheduleFocusDate });
-    return;
-  }
   updateMainScheduleLabel();
-  syncMainGanttBarInfo();
+  scheduleMainGanttViewportRelayout(wrap);
 }
 
 function handleMainGanttResize() {
@@ -1076,25 +1170,36 @@ function syncMainGanttBarInfo() {
   const firstLabel = document.querySelector("#ganttChart .gantt-equipment-label");
   if (!wrap || !firstLabel) return;
 
-  const wrapRect = wrap.getBoundingClientRect();
-  const labelRect = firstLabel.getBoundingClientRect();
-  const ganttLeft = labelRect.right;
-  const ganttRight = wrapRect.left + wrap.clientWidth;
+  const { leftBoundary: ganttLeft, rightBoundary: ganttRight } = getMainGanttViewportBounds(wrap);
+  const edgeInset = 6;
 
   document.querySelectorAll("#ganttChart .gantt-bar-info").forEach((info) => {
-    info.style.transform = "none";
+    info.style.removeProperty("transform");
+    info.style.removeProperty("width");
+    info.style.removeProperty("max-width");
+    info.style.removeProperty("overflow");
     const bar = info.closest(".gantt-bar");
     if (!bar) return;
     const barRect = bar.getBoundingClientRect();
-    if (barRect.left >= ganttLeft || barRect.right <= ganttLeft) return;
+    const crossesLeftEdge = barRect.left < ganttLeft && barRect.right > ganttLeft;
+    const crossesRightEdge = barRect.left < ganttRight && barRect.right > ganttRight;
+    if (!crossesLeftEdge && !crossesRightEdge) return;
 
-    const naturalInfoRect = info.getBoundingClientRect();
-    const infoWidth = naturalInfoRect.width;
-    const desiredLeft = ganttLeft + 6;
-    const rightLimit = ganttRight - infoWidth - 6;
-    const targetLeft = Math.min(desiredLeft, rightLimit);
-    const offset = targetLeft - naturalInfoRect.left;
-    if (offset > 0) {
+    const visibleLeft = Math.max(barRect.left, ganttLeft);
+    const visibleRight = Math.min(barRect.right, ganttRight);
+    const visibleWidth = Math.max(visibleRight - visibleLeft, 0);
+    const inset = Math.min(edgeInset, visibleWidth / 2);
+    const constrainedWidth = Math.max(visibleWidth - inset * 2, 0);
+    info.style.width = `${constrainedWidth.toFixed(2)}px`;
+    info.style.maxWidth = `${constrainedWidth.toFixed(2)}px`;
+    info.style.overflow = "hidden";
+
+    const infoRect = info.getBoundingClientRect();
+    const minLeft = visibleLeft + inset;
+    const maxLeft = visibleRight - inset - infoRect.width;
+    const targetLeft = Math.min(Math.max(infoRect.left, minLeft), Math.max(minLeft, maxLeft));
+    const offset = targetLeft - infoRect.left;
+    if (Math.abs(offset) > 0.01) {
       info.style.transform = `translateX(${offset.toFixed(2)}px)`;
     }
   });
@@ -1549,18 +1654,22 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
     );
 
     const stackedReservations = layoutStackedReservations(reservations, range);
-    const viewportRange = variant === "default" ? getMainScheduleLabelRange() : range;
-    const viewportStackedReservations = layoutStackedReservations(
-      getReservationsIntersectingRange(reservations, viewportRange),
-      range,
-    );
-    const viewportReservationLevels = new Map(
-      viewportStackedReservations.map((item) => [item.reservation, item.level]),
+    const viewportRange = variant === "default"
+      ? getMainGanttViewportDateRange(document.querySelector(".gantt-schedule-wrap"), range)
+      : null;
+    const viewportStackedReservations = variant === "default"
+      ? layoutStackedReservations(
+        getReservationsIntersectingRange(reservations, viewportRange),
+        viewportRange,
+      )
+      : [];
+    const viewportReservationLayouts = new Map(
+      viewportStackedReservations.map((item) => [item.reservation, item]),
     );
     stackedReservations.forEach((item) => {
-      item.renderLevel = viewportReservationLevels.has(item.reservation)
-        ? viewportReservationLevels.get(item.reservation)
-        : item.level;
+      const viewportItem = viewportReservationLayouts.get(item.reservation);
+      if (!viewportItem) return;
+      item.renderLevel = viewportItem.level;
     });
     const visibleStackedReservations = getVisibleStackedReservations(stackedReservations, variant);
     const laneSummary = getGanttLaneSummary(stackedReservations, visibleStackedReservations);
@@ -1593,18 +1702,21 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
         : "";
       const bar = document.createElement("button");
       bar.type = "button";
-      const textMode = variant === "default" ? (ganttMetrics?.textMode || "project") : "full";
+      const textMode = variant === "default"
+        ? (ganttMetrics?.textMode || "project")
+        : "full";
       bar.className = [
         "gantt-bar",
         `requester-category-${requesterCategory.key}`,
         purposeClass,
         variant === "bulletin" ? "bulletin-bar" : "",
+        variant === "default" && textMode === "full" ? "full-text" : "",
         variant === "default" && textMode === "project" ? "project-only" : "",
         variant === "default" && textMode === "project-requester" ? "project-requester" : "",
         getEffectiveReservationStatus(reservation) === "checked_out" ? "is-complete" : "",
       ].filter(Boolean).join(" ");
       bar.style.cssText = ganttMetrics
-        ? `${getGanttBarStyle(stacked.reservation, { gapPx: stacked.fillsToDayEnd ? 0 : 3, visualEndTime: stacked.visualEndTime, range })} top: ${ganttMetrics.top + (stacked.renderLevel ?? stacked.level) * (ganttMetrics.barHeight + ganttMetrics.gap)}px; height: ${ganttMetrics.barHeight}px;`
+        ? `${getGanttBarStyle(stacked.reservation, { gapPx: stacked.fillsToDayEnd ? 0 : 3, visualEndTime: stacked.fillsToDayEnd ? stacked.visualEndTime : null, range })} top: ${ganttMetrics.top + (stacked.renderLevel ?? stacked.level) * (ganttMetrics.barHeight + ganttMetrics.gap)}px; height: ${ganttMetrics.barHeight}px;`
         : getStackedGanttBarStyle(stacked, { variant, compact: true, range });
       bar.title = view.titleText;
       bar.innerHTML = `
@@ -3326,7 +3438,7 @@ function formatTime(value) {
 
 function formatDateTime(value) {
   const d = new Date(value);
-  const day = d.toLocaleDateString("zh-TW", { month: "2-digit", day: "2-digit" });
+  const day = d.toLocaleDateString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit" });
   const time = d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false });
   return `${day} ${time}`;
 }

@@ -1175,6 +1175,12 @@ textarea:focus {
   max-width: calc(100% - 16px);
   overflow: visible;
   will-change: transform;
+  text-align: center;
+}
+
+.gantt-schedule-wrap .gantt-bar {
+  align-items: center;
+  text-align: center;
 }
 
 .bulletin-bar {
@@ -1207,14 +1213,34 @@ textarea:focus {
 
 .gantt-bar.project-only {
   /* 單行模式：只顯示專案名稱，文字垂直置中 */
-  align-items: center;
+  align-items: stretch;
+  padding-left: 2px;
+  padding-right: 2px;
   padding-top: 0;
   padding-bottom: 0;
 }
 
+.gantt-schedule-wrap .gantt-bar.project-only .gantt-bar-info {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.gantt-schedule-wrap .gantt-bar.full-text .gantt-bar-info {
+  /* 完整文字只在自己的色塊內顯示，密集堆疊時超出高度就裁切 */
+  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .gantt-bar.project-only strong {
   /* 單行模式下，讓專案名稱撐滿整個寬度，省去奇怪縮排 */
+  min-width: 0;
   width: 100%;
+  text-align: center;
 }
 
 .compact-bar strong {
@@ -2038,6 +2064,9 @@ th {
 }
 
 .reservation-floorplan-panel.is-thumbnail .floorplan-device {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   font-size: 9px;
   padding: 1px 2px;
 }
