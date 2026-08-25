@@ -3525,13 +3525,8 @@ function syncBulletinStickyOffset(wrap) {
 
 function getBulletinBottomScrollTop(wrap) {
   const maxTop = Math.max(wrap.scrollHeight - wrap.clientHeight, 0);
-  const wrapTop = wrap.getBoundingClientRect().top;
-  const stickyOffset = syncBulletinStickyOffset(wrap);
-  const rowStarts = Array.from(wrap.querySelectorAll(".bulletin-row"))
-    .map((row) => row.getBoundingClientRect().top - wrapTop + wrap.scrollTop - stickyOffset)
-    .filter((top) => top > 8 && top <= maxTop + 8);
-
-  return rowStarts.at(-1) ?? maxTop;
+  syncBulletinStickyOffset(wrap);
+  return maxTop;
 }
 
 function stepBulletinAutoScroll() {

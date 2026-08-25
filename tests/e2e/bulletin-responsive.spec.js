@@ -441,3 +441,41 @@ test("bulletin scroll settings are applied and auto-scroll scheduling stays stab
   expect(metrics.wrapScrollHeight).toBeGreaterThan(metrics.wrapClientHeight);
   expect(pageErrors).toEqual([]);
 });
+
+test("bulletin auto-scroll reaches the true bottom so the last row is not clipped", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 1912, height: 365 });
+
+  const fullscreenEnabled = await page.evaluate(() => document.fullscreenEnabled);
+  test.skip(!fullscreenEnabled, "Fullscreen API is not available in this browser run.");
+
+  await page.locator("#bulletinFullscreenBtn").click();
+  await expect.poll(async () => (await getBulletinMetrics(page)).fullscreenElementId).toBe("bulletinBoard");
+
+  await page.evaluate(() => {
+    const wrap = document.querySelector(".bulletin-wrap");
+    wrap.scrollTo({ top: 0, behavior: "auto" });
+    stepBulletinAutoScroll();
+  });
+  await page.waitForTimeout(1200);
+
+  const bottomMetrics = await page.evaluate(() => {
+    const wrap = document.querySelector(".bulletin-wrap");
+    const lastRow = document.querySelector(".bulletin-row:last-child");
+    const maxTop = Math.max(wrap.scrollHeight - wrap.clientHeight, 0);
+    const targetTop = getBulletinBottomScrollTop(wrap);
+    const rowRect = lastRow.getBoundingClientRect();
+    const wrapRect = wrap.getBoundingClientRect();
+    return {
+      maxTop,
+      targetTop,
+      actualTop: wrap.scrollTop,
+      lastRowBottom: rowRect.bottom,
+      wrapBottom: wrapRect.bottom,
+    };
+  });
+
+  expect(bottomMetrics.targetTop).toBe(bottomMetrics.maxTop);
+  expect(bottomMetrics.actualTop).toBe(bottomMetrics.maxTop);
+  expect(bottomMetrics.lastRowBottom).toBeLessThanOrEqual(bottomMetrics.wrapBottom + 1);
+  expect(pageErrors).toEqual([]);
+});
