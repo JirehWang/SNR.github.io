@@ -238,6 +238,59 @@ test("bulletin range select redraws one, two, and four week day headers without 
   expect(pageErrors).toEqual([]);
 });
 
+test("bulletin equipment display mode filters rows and restores all equipment", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 });
+
+  await expect(page.locator("#bulletinEquipmentMode")).toHaveValue("all");
+  await expect(page.locator(".bulletin-row")).toHaveCount(ACTIVE_EQUIPMENT_COUNT);
+
+  await expandBulletinSettings(page);
+  await page.locator("#bulletinEquipmentMode").selectOption("custom");
+  const checkboxes = page.locator("#bulletinEquipmentOptions input[type='checkbox']");
+  await expect(page.locator("#bulletinEquipmentOptions")).toBeVisible();
+  await expect(checkboxes).toHaveCount(ACTIVE_EQUIPMENT_COUNT);
+  expect(await checkboxes.evaluateAll((items) => items.every((item) => item.checked))).toBe(true);
+
+  await checkboxes.nth(0).uncheck();
+  await expect(page.locator(".bulletin-row")).toHaveCount(ACTIVE_EQUIPMENT_COUNT - 1);
+  await page.locator("#bulletinEquipmentOptions input[type='checkbox']").nth(1).uncheck();
+  await expect(page.locator(".bulletin-row")).toHaveCount(ACTIVE_EQUIPMENT_COUNT - 2);
+  expect(await page.evaluate(() => document.cookie)).toContain("snr_bulletin_settings_v1=");
+  await page.evaluate(() => window.localStorage.clear());
+
+  await page.reload();
+  await expect(page.locator("#connectionBadge")).toHaveText("已連線");
+  await expect(page.locator("#bulletinEquipmentMode")).toHaveValue("custom");
+  await expect(page.locator(".bulletin-row")).toHaveCount(ACTIVE_EQUIPMENT_COUNT - 2);
+
+  await expandBulletinSettings(page);
+  await page.locator("#bulletinEquipmentMode").selectOption("all");
+  await expect(page.locator(".bulletin-row")).toHaveCount(ACTIVE_EQUIPMENT_COUNT);
+  await expect(page.locator("#bulletinEquipmentOptions")).toBeHidden();
+  expect(pageErrors).toEqual([]);
+});
+
+test("bulletin range and scroll settings persist through the settings cookie", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 });
+
+  await selectBulletinRange(page, 14);
+  await page.locator("#bulletinScrollInterval").fill("45");
+  await page.locator("#bulletinScrollInterval").dispatchEvent("change");
+  await page.locator("#bulletinScrollDuration").fill("3");
+  await page.locator("#bulletinScrollDuration").dispatchEvent("change");
+  expect(await page.evaluate(() => document.cookie)).toContain("snr_bulletin_settings_v1=");
+
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
+
+  await expect(page.locator("#connectionBadge")).toHaveText("已連線");
+  await expect(page.locator("#bulletinRangeSelect")).toHaveValue("14");
+  await expect(page.locator(".bulletin-scale .gantt-day")).toHaveCount(14);
+  await expect(page.locator("#bulletinScrollInterval")).toHaveValue("45");
+  await expect(page.locator("#bulletinScrollDuration")).toHaveValue("3");
+  expect(pageErrors).toEqual([]);
+});
+
 test.describe("bulletin daily range synchronization", () => {
   test.use({ timezoneId: "Asia/Taipei" });
 

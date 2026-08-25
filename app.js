@@ -214,6 +214,11 @@ const BULLETIN_MIN_DAY_WIDTH = 24;
 const BULLETIN_MIN_EQUIPMENT_COLUMN_WIDTH = 136;
 const BULLETIN_RANGE_DAY_OPTIONS = [7, 14, 28];
 const BULLETIN_DEFAULT_RANGE_DAYS = 28;
+const BULLETIN_SETTINGS_COOKIE_NAME = "snr_bulletin_settings_v1";
+const BULLETIN_SETTINGS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+const BULLETIN_SETTINGS_STORAGE_KEY = "snr.bulletin.settings.v1";
+const BULLETIN_EQUIPMENT_STORAGE_KEY = "snr.bulletin.equipment-filter.v1";
+const BULLETIN_EQUIPMENT_MODES = ["all", "custom"];
 
 const FLOORPLAN_STORAGE_KEY = "snr.floorplan.placements.v1";
 const EQUIPMENT_DRAFT_ID = -1;
@@ -249,6 +254,8 @@ const state = {
   bulletinRangeStart: startOfDay(new Date()),
   bulletinRangeDays: BULLETIN_DEFAULT_RANGE_DAYS,
   bulletinRangeSyncTimerId: null,
+  bulletinEquipmentMode: "all",
+  bulletinSelectedEquipmentIds: [],
   scheduleStart: startOfDay(new Date()),
   scheduleRangeStart: addMonths(startOfDay(new Date()), -SCHEDULE_EXTENSION_MONTHS),
   scheduleRangeEnd: addMonths(addMonths(startOfDay(new Date()), 1), SCHEDULE_EXTENSION_MONTHS),
@@ -340,6 +347,8 @@ function bindEvents() {
   document.getElementById("bulletinPrevMonth").addEventListener("click", () => moveBulletinMonth(-1));
   document.getElementById("bulletinNextMonth").addEventListener("click", () => moveBulletinMonth(1));
   document.getElementById("bulletinRangeSelect").addEventListener("change", updateBulletinRangeSelection);
+  document.getElementById("bulletinEquipmentMode").addEventListener("change", updateBulletinEquipmentMode);
+  document.getElementById("bulletinEquipmentOptions").addEventListener("change", updateBulletinEquipmentSelection);
   document.getElementById("bulletinFullscreenBtn").addEventListener("click", openBulletinFullscreen);
   document.getElementById("openBulletinWindowBtn").addEventListener("click", openBulletinWindow);
   document.getElementById("bulletinScrollInterval").addEventListener("change", updateBulletinScrollSettings);
@@ -462,9 +471,195 @@ function initializeBulletinControls() {
   const rangeSelect = document.getElementById("bulletinRangeSelect");
   const intervalInput = document.getElementById("bulletinScrollInterval");
   const durationInput = document.getElementById("bulletinScrollDuration");
+  const displaySettings = readBulletinSettings();
+  state.bulletinRangeDays = displaySettings.rangeDays;
+  state.bulletinEquipmentMode = displaySettings.equipmentMode;
+  state.bulletinSelectedEquipmentIds = displaySettings.selectedEquipmentIds;
+  state.bulletinScroll.intervalSeconds = displaySettings.scrollIntervalSeconds;
+  state.bulletinScroll.durationSeconds = displaySettings.scrollDurationSeconds;
+  if (displaySettings.source === "localStorage") saveBulletinSettings();
   rangeSelect.value = String(getBulletinRangeDays());
   intervalInput.value = String(state.bulletinScroll.intervalSeconds);
   durationInput.value = String(state.bulletinScroll.durationSeconds);
+  renderBulletinEquipmentControls();
+}
+
+function getBulletinEquipmentMode(value = state.bulletinEquipmentMode) {
+  return BULLETIN_EQUIPMENT_MODES.includes(value) ? value : "all";
+}
+
+function normalizeBulletinEquipmentIds(value) {
+  return Array.from(new Set(
+    (Array.isArray(value) ? value : [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id)),
+  ));
+}
+
+function getBulletinSettingsDefaults() {
+  return {
+    rangeDays: BULLETIN_DEFAULT_RANGE_DAYS,
+    scrollIntervalSeconds: 30,
+    scrollDurationSeconds: 1,
+    equipmentMode: "all",
+    selectedEquipmentIds: [],
+  };
+}
+
+function normalizeBulletinSettings(value = {}) {
+  const defaults = getBulletinSettingsDefaults();
+  return {
+    rangeDays: getBulletinRangeDays(value.rangeDays ?? defaults.rangeDays),
+    scrollIntervalSeconds: clampNumber(value.scrollIntervalSeconds ?? value.intervalSeconds, 5, 300, defaults.scrollIntervalSeconds),
+    scrollDurationSeconds: clampNumber(value.scrollDurationSeconds ?? value.durationSeconds, 1, 30, defaults.scrollDurationSeconds),
+    equipmentMode: getBulletinEquipmentMode(value.equipmentMode ?? value.mode ?? defaults.equipmentMode),
+    selectedEquipmentIds: normalizeBulletinEquipmentIds(value.selectedEquipmentIds),
+  };
+}
+
+function readBulletinSettingsCookie() {
+  const cookiePrefix = `${BULLETIN_SETTINGS_COOKIE_NAME}=`;
+  const cookie = String(document.cookie || "")
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(cookiePrefix));
+  if (!cookie) return "";
+
+  try {
+    return decodeURIComponent(cookie.slice(cookiePrefix.length));
+  } catch (error) {
+    console.warn("Bulletin settings cookie decode failed", error);
+    return "";
+  }
+}
+
+function parseBulletinSettings(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return normalizeBulletinSettings(parsed);
+  } catch (error) {
+    console.warn("Bulletin equipment settings parse failed", error);
+    return null;
+  }
+}
+
+function readBulletinEquipmentSettings() {
+  try {
+    return parseBulletinSettings(window.localStorage?.getItem(BULLETIN_EQUIPMENT_STORAGE_KEY));
+  } catch (error) {
+    console.warn("Bulletin equipment settings read failed", error);
+    return null;
+  }
+}
+
+function readBulletinSettings() {
+  const cookieSettings = parseBulletinSettings(readBulletinSettingsCookie());
+  if (cookieSettings) return { ...cookieSettings, source: "cookie" };
+
+  try {
+    const storedSettings = parseBulletinSettings(window.localStorage?.getItem(BULLETIN_SETTINGS_STORAGE_KEY));
+    if (storedSettings) return { ...storedSettings, source: "localStorage" };
+  } catch (error) {
+    console.warn("Bulletin settings localStorage read failed", error);
+  }
+
+  const legacyEquipmentSettings = readBulletinEquipmentSettings();
+  if (legacyEquipmentSettings) {
+    return {
+      ...getBulletinSettingsDefaults(),
+      ...legacyEquipmentSettings,
+      source: "localStorage",
+    };
+  }
+
+  return { ...getBulletinSettingsDefaults(), source: "default" };
+}
+
+function getCurrentBulletinSettings() {
+  return normalizeBulletinSettings({
+    rangeDays: state.bulletinRangeDays,
+    scrollIntervalSeconds: state.bulletinScroll.intervalSeconds,
+    scrollDurationSeconds: state.bulletinScroll.durationSeconds,
+    equipmentMode: state.bulletinEquipmentMode,
+    selectedEquipmentIds: state.bulletinSelectedEquipmentIds,
+  });
+}
+
+function saveBulletinSettings() {
+  const settings = getCurrentBulletinSettings();
+  const serialized = JSON.stringify(settings);
+
+  try {
+    document.cookie = [
+      `${BULLETIN_SETTINGS_COOKIE_NAME}=${encodeURIComponent(serialized)}`,
+      `max-age=${BULLETIN_SETTINGS_COOKIE_MAX_AGE_SECONDS}`,
+      "path=/",
+      "SameSite=Lax",
+    ].join("; ");
+  } catch (error) {
+    console.warn("Bulletin settings cookie save failed", error);
+  }
+
+  try {
+    window.localStorage?.setItem(BULLETIN_SETTINGS_STORAGE_KEY, serialized);
+    window.localStorage?.setItem(BULLETIN_EQUIPMENT_STORAGE_KEY, JSON.stringify({
+      mode: settings.equipmentMode,
+      selectedEquipmentIds: settings.selectedEquipmentIds,
+    }));
+  } catch (error) {
+    console.warn("Bulletin settings localStorage save failed", error);
+  }
+}
+
+function saveBulletinEquipmentSettings() {
+  saveBulletinSettings();
+}
+
+function getBulletinSelectableEquipment() {
+  return state.equipment.filter((equipment) => !isEquipmentDisabled(equipment));
+}
+
+function getBulletinVisibleEquipment() {
+  const selectableEquipment = getBulletinSelectableEquipment();
+  if (getBulletinEquipmentMode() !== "custom") return selectableEquipment;
+  const selectedIds = new Set(normalizeBulletinEquipmentIds(state.bulletinSelectedEquipmentIds));
+  return selectableEquipment.filter((equipment) => selectedIds.has(Number(equipment.id)));
+}
+
+function renderBulletinEquipmentControls() {
+  const modeSelect = document.getElementById("bulletinEquipmentMode");
+  const optionsRoot = document.getElementById("bulletinEquipmentOptions");
+  if (!modeSelect || !optionsRoot) return;
+
+  const mode = getBulletinEquipmentMode();
+  const selectableEquipment = getBulletinSelectableEquipment();
+  const selectedIds = new Set(normalizeBulletinEquipmentIds(state.bulletinSelectedEquipmentIds));
+  const selectedCount = selectableEquipment.filter((equipment) => selectedIds.has(Number(equipment.id))).length;
+  modeSelect.value = mode;
+  optionsRoot.hidden = mode !== "custom";
+  optionsRoot.setAttribute("aria-hidden", mode === "custom" ? "false" : "true");
+
+  if (mode !== "custom") {
+    optionsRoot.innerHTML = "";
+    return;
+  }
+
+  optionsRoot.innerHTML = `
+    <div class="bulletin-equipment-options-header">
+      <span>選擇設備（已選 ${selectedCount} 台）</span>
+      <span class="bulletin-equipment-options-hint">取消勾選後立即套用</span>
+    </div>
+    <div class="bulletin-equipment-checkboxes">
+      ${selectableEquipment.map((equipment) => `
+        <label class="bulletin-equipment-option">
+          <input type="checkbox" data-bulletin-equipment-id="${escapeHtml(equipment.id)}" ${selectedIds.has(Number(equipment.id)) ? "checked" : ""}>
+          <span>${escapeHtml(equipment.name || `設備 #${equipment.id}`)}${equipment.category ? `（${escapeHtml(equipment.category)}）` : ""}</span>
+        </label>
+      `).join("")}
+    </div>
+  `;
 }
 
 function bindBulletinSettingsToggle() {
@@ -781,6 +976,7 @@ function renderAll() {
   renderEquipmentOptions();
   renderRequesterOptions();
   renderAnalyticsEquipmentOptions();
+  renderBulletinEquipmentControls();
   renderRequesterSummary();
   renderEquipmentSummary();
   renderEquipmentFloorplan();
@@ -1734,9 +1930,18 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
   }
 
   const visibleEquipment = state.equipment.filter((equipment) => !isEquipmentDisabled(equipment));
-  const ganttEquipment = state.selectedGanttEquipmentId == null
-    ? visibleEquipment
-    : visibleEquipment.filter((equipment) => Number(equipment.id) === Number(state.selectedGanttEquipmentId));
+  const bulletinEquipment = variant === "bulletin" ? getBulletinVisibleEquipment() : visibleEquipment;
+  const ganttEquipment = variant === "bulletin"
+    ? bulletinEquipment
+    : state.selectedGanttEquipmentId == null
+      ? visibleEquipment
+      : visibleEquipment.filter((equipment) => Number(equipment.id) === Number(state.selectedGanttEquipmentId));
+  if (!ganttEquipment.length) {
+    if (variant === "bulletin") {
+      chart.innerHTML = '<div class="gantt-placeholder">目前未選擇設備，請在「顯示設定」中選取要顯示的設備。</div>';
+    }
+    return;
+  }
   ganttEquipment.forEach((equipment) => {
     const equipmentView = getEquipmentViewModel(equipment);
     const row = document.createElement("div");
@@ -3123,6 +3328,37 @@ function updateBulletinRangeSelection() {
   state.bulletinRangeDays = getBulletinRangeDays(rangeSelect.value);
   rangeSelect.value = String(state.bulletinRangeDays);
   state.bulletinRangeStart = startOfDay(state.bulletinRangeStart || new Date());
+  saveBulletinSettings();
+  relayoutBulletinBoard({ resetAutoScroll: true });
+}
+
+function updateBulletinEquipmentMode() {
+  const modeSelect = document.getElementById("bulletinEquipmentMode");
+  const nextMode = getBulletinEquipmentMode(modeSelect.value);
+  if (nextMode === "custom" && state.bulletinEquipmentMode !== "custom" && !state.bulletinSelectedEquipmentIds.length) {
+    state.bulletinSelectedEquipmentIds = getBulletinSelectableEquipment().map((equipment) => Number(equipment.id));
+  }
+  state.bulletinEquipmentMode = nextMode;
+  saveBulletinEquipmentSettings();
+  renderBulletinEquipmentControls();
+  relayoutBulletinBoard({ resetAutoScroll: true });
+}
+
+function updateBulletinEquipmentSelection(event) {
+  const checkbox = event.target;
+  if (!(checkbox instanceof HTMLInputElement) || !checkbox.matches("[data-bulletin-equipment-id]")) return;
+
+  const equipmentId = Number(checkbox.dataset.bulletinEquipmentId);
+  if (!Number.isInteger(equipmentId)) return;
+  const selectedIds = new Set(normalizeBulletinEquipmentIds(state.bulletinSelectedEquipmentIds));
+  if (checkbox.checked) {
+    selectedIds.add(equipmentId);
+  } else {
+    selectedIds.delete(equipmentId);
+  }
+  state.bulletinSelectedEquipmentIds = Array.from(selectedIds);
+  saveBulletinEquipmentSettings();
+  renderBulletinEquipmentControls();
   relayoutBulletinBoard({ resetAutoScroll: true });
 }
 
@@ -3133,6 +3369,7 @@ function updateBulletinScrollSettings() {
   state.bulletinScroll.durationSeconds = clampNumber(durationInput.value, 1, 30, 1);
   intervalInput.value = String(state.bulletinScroll.intervalSeconds);
   durationInput.value = String(state.bulletinScroll.durationSeconds);
+  saveBulletinSettings();
   scheduleBulletinAutoScroll();
 }
 

@@ -524,6 +524,13 @@
                   </select>
                 </label>
                 <label>
+                  設備顯示
+                  <select id="bulletinEquipmentMode" aria-label="公佈欄設備顯示方式">
+                    <option value="all" selected>全部</option>
+                    <option value="custom">自定義</option>
+                  </select>
+                </label>
+                <label>
                   捲動間隔（秒）
                   <input id="bulletinScrollInterval" type="number" min="5" max="300" step="5" value="30">
                 </label>
@@ -532,6 +539,7 @@
                   <input id="bulletinScrollDuration" type="number" min="1" max="30" step="1" value="1">
                 </label>
               </div>
+              <div id="bulletinEquipmentOptions" class="bulletin-equipment-options" hidden aria-label="自定義設備選擇"></div>
             </div>
           </details>
           <div class="gantt-wrap bulletin-wrap">
