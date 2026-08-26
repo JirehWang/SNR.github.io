@@ -74,9 +74,23 @@ async function getBulletinMetrics(page) {
     const settings = document.querySelector("#bulletinSettings");
     const settingsToggle = document.querySelector("#bulletinSettingsToggle");
     const fullscreenButton = document.querySelector("#bulletinFullscreenBtn");
+    const topRegion = document.querySelector("#bulletinTopRegion");
+    const resizeHandle = document.querySelector("#bulletinTopResizeHandle");
     const settingsRect = settings.getBoundingClientRect();
     const settingsToggleRect = settingsToggle.getBoundingClientRect();
     const fullscreenButtonRect = fullscreenButton.getBoundingClientRect();
+    const topRegionRect = topRegion.getBoundingClientRect();
+    const resizeHandleRect = resizeHandle.getBoundingClientRect();
+    const titleRowRect = topRegion.querySelector(".section-title").getBoundingClientRect();
+    const titleCopyRect = topRegion.querySelector(".bulletin-title-copy").getBoundingClientRect();
+    const legend = document.querySelector("#bulletinColorLegend");
+    const legendRect = legend.getBoundingClientRect();
+    const legendMatrixRect = legend.querySelector(".bulletin-legend-matrix").getBoundingClientRect();
+    const weekControlsRect = topRegion.querySelector(".week-controls").getBoundingClientRect();
+    const dateNavRect = document.querySelector("#bulletinMonthLabel").closest(".date-navigation").getBoundingClientRect();
+    const rectsOverlap = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const topRegionVisible = document.fullscreenElement?.id !== "bulletinBoard" || topRegionRect.height > 1;
+    const legendMatrixDots = Array.from(legend.querySelectorAll(".bulletin-legend-matrix .legend-swatch"));
     return {
       dayCount: document.querySelectorAll(".bulletin-scale .gantt-day").length,
       rowCount: document.querySelectorAll(".bulletin-row").length,
@@ -90,9 +104,38 @@ async function getBulletinMetrics(page) {
       settingsOpen: settings.open,
       settingsExpanded: settingsToggle.getAttribute("aria-expanded"),
       settingsHeight: settingsRect.height,
-      settingsToggleVisible: settingsToggleRect.width > 0 && settingsToggleRect.height > 0 && settingsToggleRect.top >= 0 && settingsToggleRect.bottom <= window.innerHeight,
+      settingsToggleVisible: topRegionVisible && settingsToggleRect.width > 0 && settingsToggleRect.height > 0 && settingsToggleRect.top >= 0 && settingsToggleRect.bottom <= window.innerHeight,
       settingsPanelVisible: settings.open,
-      fullscreenButtonVisible: fullscreenButtonRect.top >= 0 && fullscreenButtonRect.bottom <= window.innerHeight,
+      topRegionHeight: topRegionRect.height,
+      topRegionAriaHidden: topRegion.getAttribute("aria-hidden"),
+      topRegionInert: topRegion.hasAttribute("inert"),
+      resizeHandleVisible: resizeHandleRect.width > 0 && resizeHandleRect.height > 0 && resizeHandleRect.top >= 0 && resizeHandleRect.bottom <= window.innerHeight,
+      resizeHandleTagName: resizeHandle.tagName,
+      resizeHandleRole: resizeHandle.getAttribute("role"),
+      resizeHandleExpanded: resizeHandle.getAttribute("aria-expanded"),
+      resizeHandleLabel: resizeHandle.getAttribute("aria-label"),
+      resizeHandleTitle: resizeHandle.getAttribute("title"),
+      resizeHandleCursor: window.getComputedStyle(resizeHandle).cursor,
+      resizeHandleTouchAction: window.getComputedStyle(resizeHandle).touchAction,
+      legendVisible: legendRect.width > 0 && legendRect.height > 0,
+      legendRightOfTitle: legendRect.left >= titleCopyRect.right - 1,
+      legendLeftOfControls: legendRect.right <= weekControlsRect.left + 1,
+      legendControlsOverlap: rectsOverlap(legendRect, weekControlsRect),
+      legendDateNavOverlap: rectsOverlap(legendRect, dateNavRect),
+      legendTopRowContained: legendRect.left >= titleRowRect.left - 1
+        && weekControlsRect.right <= titleRowRect.right + 1
+        && Math.max(legendRect.bottom, weekControlsRect.bottom) <= titleRowRect.bottom + 1,
+      legendColumnHeaders: Array.from(legend.querySelectorAll("thead th[scope='col']"))
+        .map((item) => item.textContent.trim())
+        .filter(Boolean),
+      legendRowHeaders: Array.from(legend.querySelectorAll("tbody th[scope='row']"))
+        .map((item) => item.textContent.trim()),
+      legendCellLabels: Array.from(legend.querySelectorAll(".bulletin-legend-cell"))
+        .map((item) => item.getAttribute("aria-label")),
+      legendMatrixDotCount: legendMatrixDots.length,
+      legendTotalDotCount: legend.querySelectorAll(".legend-swatch").length,
+      legendMatrixWidth: legendMatrixRect.width,
+      fullscreenButtonVisible: topRegionVisible && fullscreenButtonRect.top >= 0 && fullscreenButtonRect.bottom <= window.innerHeight,
       fullscreenElementId: document.fullscreenElement?.id || "",
       monthLabel: document.querySelector("#bulletinMonthLabel").textContent,
       rangeValue: document.querySelector("#bulletinRangeSelect").value,
@@ -156,6 +199,13 @@ async function openMockedBulletin(page, viewport, options = {}) {
 }
 
 async function expandBulletinSettings(page) {
+  if ((await getBulletinMetrics(page)).fullscreenElementId === "bulletinBoard") {
+    const metrics = await getBulletinMetrics(page);
+    if (metrics.topRegionHeight <= 0) {
+      await page.locator("#bulletinTopResizeHandle").click();
+    }
+    await expect.poll(async () => (await getBulletinMetrics(page)).topRegionHeight).toBe(260);
+  }
   if (!(await page.locator("#bulletinSettings").evaluate((settings) => settings.open))) {
     await page.locator("#bulletinSettingsToggle").click();
   }
@@ -190,6 +240,27 @@ test("bulletin tablet landscape defaults to four weeks and keeps active equipmen
   expect(metrics.settingsPanelVisible).toBe(false);
   expect(metrics.controlsVisible).toBe(false);
   expect(metrics.settingsHeight).toBeLessThanOrEqual(44);
+  expect(metrics.legendVisible).toBe(true);
+  expect(metrics.legendRightOfTitle).toBe(true);
+  expect(metrics.legendLeftOfControls).toBe(true);
+  expect(metrics.legendControlsOverlap).toBe(false);
+  expect(metrics.legendDateNavOverlap).toBe(false);
+  expect(metrics.legendTopRowContained).toBe(true);
+  expect(metrics.legendColumnHeaders).toEqual(["未完成", "已完成"]);
+  expect(metrics.legendRowHeaders).toEqual(["PQE", "神準", "外部", "儀校"]);
+  expect(metrics.legendCellLabels).toEqual([
+    "PQE 未完成",
+    "PQE 已完成",
+    "神準 未完成",
+    "神準 已完成",
+    "外部 未完成",
+    "外部 已完成",
+    "儀校 未完成",
+    "儀校 已完成",
+  ]);
+  expect(metrics.legendMatrixDotCount).toBe(8);
+  expect(metrics.legendTotalDotCount).toBe(8);
+  expect(metrics.legendMatrixWidth).toBeLessThanOrEqual(220);
   expect(metrics.rangeValue).toBe("28");
   expect(metrics.rangeOptions).toEqual([
     { value: "7", text: "1 週" },
@@ -216,6 +287,82 @@ test("bulletin tablet landscape defaults to four weeks and keeps active equipmen
   expect(collapsedMetrics.controlsVisible).toBe(false);
   expect(collapsedMetrics.settingsPanelVisible).toBe(false);
   expect(collapsedMetrics.settingsToggleVisible).toBe(true);
+  expect(pageErrors).toEqual([]);
+});
+
+test("bulletin legend mirrors requester unit colors for open and completed states", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 });
+
+  const legend = await page.evaluate(() => {
+    const readSwatch = (label) => {
+      const selector = `.bulletin-legend-cell[aria-label='${label}'] .legend-swatch`;
+      const element = document.querySelector(selector);
+      const style = window.getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        borderColor: style.borderColor,
+        borderStyle: style.borderStyle,
+        borderRadius: style.borderRadius,
+        height: element.getBoundingClientRect().height,
+        width: element.getBoundingClientRect().width,
+      };
+    };
+    const readReference = (className) => {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.className = `gantt-bar bulletin-bar ${className}`;
+      element.style.position = "fixed";
+      element.style.left = "-1000px";
+      element.style.top = "-1000px";
+      document.body.appendChild(element);
+      const style = window.getComputedStyle(element);
+      const result = {
+        backgroundColor: style.backgroundColor,
+        borderColor: style.borderColor,
+        borderStyle: style.borderStyle,
+      };
+      element.remove();
+      return result;
+    };
+
+    return {
+      text: document.querySelector("#bulletinColorLegend").textContent,
+      units: [
+        { unit: "pqe", label: "PQE" },
+        { unit: "senao", label: "神準" },
+        { unit: "external", label: "外部" },
+        { unit: "purpose-calibration", label: "儀校" },
+      ].map(({ unit, label }) => ({
+        unit,
+        open: readSwatch(`${label} 未完成`),
+        openReference: readReference(unit === "purpose-calibration" ? unit : `requester-category-${unit}`),
+        complete: readSwatch(`${label} 已完成`),
+        completeReference: readReference(`${unit === "purpose-calibration" ? unit : `requester-category-${unit}`} is-complete`),
+      })),
+    };
+  });
+
+  expect(legend.text).toContain("PQE 未完成");
+  expect(legend.text).toContain("PQE 已完成");
+  expect(legend.text).toContain("神準 未完成");
+  expect(legend.text).toContain("神準 已完成");
+  expect(legend.text).toContain("外部 未完成");
+  expect(legend.text).toContain("外部 已完成");
+  expect(legend.text).toContain("儀校 未完成");
+  expect(legend.text).toContain("儀校 已完成");
+  for (const unit of legend.units) {
+    expect(unit.open.backgroundColor).toBe(unit.openReference.backgroundColor);
+    expect(unit.open.borderColor).toBe(unit.openReference.borderColor);
+    expect(unit.open.width).toBe(10);
+    expect(unit.open.height).toBe(10);
+    expect(unit.open.borderRadius).toBe("999px");
+    expect(unit.complete.backgroundColor).toBe(unit.completeReference.backgroundColor);
+    expect(unit.complete.borderColor).toBe(unit.completeReference.borderColor);
+    expect(unit.complete.borderStyle).toBe("dashed");
+    expect(unit.complete.width).toBe(10);
+    expect(unit.complete.height).toBe(10);
+    expect(unit.complete.borderRadius).toBe("999px");
+  }
   expect(pageErrors).toEqual([]);
 });
 
@@ -386,13 +533,54 @@ test("bulletin fullscreenchange rerenders stale tablet-width gantt columns", asy
   expect(metrics.rowCount).toBe(ACTIVE_EQUIPMENT_COUNT);
   expect(metrics.chartWidth).toBeLessThan(2080);
   expect(metrics.settingsOpen).toBe(false);
-  expect(metrics.settingsToggleVisible).toBe(true);
+  expect(metrics.topRegionHeight).toBe(0);
+  expect(metrics.topRegionAriaHidden).toBe("true");
+  expect(metrics.topRegionInert).toBe(true);
+  expect(metrics.settingsToggleVisible).toBe(false);
+  expect(metrics.resizeHandleVisible).toBe(true);
+  expect(metrics.resizeHandleTagName).toBe("BUTTON");
+  expect(metrics.resizeHandleRole).toBe(null);
+  expect(metrics.resizeHandleExpanded).toBe("false");
+  expect(metrics.resizeHandleLabel).toBe("點擊展開設定區");
+  expect(metrics.resizeHandleTitle).toBe("點擊展開設定區");
+  expect(metrics.resizeHandleCursor).toBe("pointer");
+  expect(metrics.resizeHandleTouchAction).not.toBe("none");
   expect(metrics.controlsVisible).toBe(false);
-  expect(metrics.fullscreenButtonVisible).toBe(true);
+  expect(metrics.fullscreenButtonVisible).toBe(false);
   expect(metrics.dayTextContained).toBe(true);
   expect(metrics.wrapScrollHeight).toBeGreaterThan(metrics.wrapClientHeight);
   expect(metrics.chartWidth).toBeLessThanOrEqual(metrics.wrapClientWidth + 2);
   expect(metrics.wrapScrollWidth).toBeLessThanOrEqual(metrics.wrapClientWidth + 2);
+  expect(pageErrors).toEqual([]);
+});
+
+test("bulletin fullscreen handle toggles the top settings region", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 });
+
+  const fullscreenEnabled = await page.evaluate(() => document.fullscreenEnabled);
+  test.skip(!fullscreenEnabled, "Fullscreen API is not available in this browser run.");
+
+  await page.locator("#bulletinFullscreenBtn").click();
+  await expect.poll(async () => (await getBulletinMetrics(page)).fullscreenElementId).toBe("bulletinBoard");
+  await expect.poll(async () => (await getBulletinMetrics(page)).topRegionHeight).toBe(0);
+
+  await page.locator("#bulletinTopResizeHandle").click();
+  await expect.poll(async () => (await getBulletinMetrics(page)).topRegionHeight).toBe(260);
+  let metrics = await getBulletinMetrics(page);
+  expect(metrics.resizeHandleExpanded).toBe("true");
+  expect(metrics.resizeHandleLabel).toBe("點擊收合設定區");
+  expect(metrics.resizeHandleTitle).toBe("點擊收合設定區");
+  expect(metrics.topRegionAriaHidden).toBe(null);
+  expect(metrics.topRegionInert).toBe(false);
+
+  await page.locator("#bulletinTopResizeHandle").click();
+  await expect.poll(async () => (await getBulletinMetrics(page)).topRegionHeight).toBe(0);
+  metrics = await getBulletinMetrics(page);
+  expect(metrics.resizeHandleExpanded).toBe("false");
+  expect(metrics.resizeHandleLabel).toBe("點擊展開設定區");
+  expect(metrics.resizeHandleTitle).toBe("點擊展開設定區");
+  expect(metrics.topRegionAriaHidden).toBe("true");
+  expect(metrics.topRegionInert).toBe(true);
   expect(pageErrors).toEqual([]);
 });
 
@@ -450,6 +638,9 @@ test("bulletin auto-scroll reaches the true bottom so the last row is not clippe
 
   await page.locator("#bulletinFullscreenBtn").click();
   await expect.poll(async () => (await getBulletinMetrics(page)).fullscreenElementId).toBe("bulletinBoard");
+  await page.evaluate(() => new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  }));
 
   await page.evaluate(() => {
     const wrap = document.querySelector(".bulletin-wrap");

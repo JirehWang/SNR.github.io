@@ -46,6 +46,34 @@ class ApiTestCase(unittest.TestCase):
             self.request("GET", "/app/server.py")
         self.assertEqual(ctx.exception.code, 404)
 
+    def test_preview_page_is_served_but_other_files_remain_blocked(self):
+        with urlopen(f"{self.base}/preview.html", timeout=5) as response:
+            html = response.read().decode("utf-8")
+            status = response.status
+
+        self.assertEqual(status, 200)
+        self.assertIn("僅供本機 responsive 驗證", html)
+        self.assertIn('src="/?view=bulletin#bulletinBoard"', html)
+
+        with self.assertRaises(HTTPError) as ctx:
+            self.request("GET", "/README.md")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_frontend_assets_are_served_without_allowing_path_traversal(self):
+        asset_path = "/assets/floorplan/equipment-floorplan-ui-transparent-clean.png"
+        with urlopen(f"{self.base}{asset_path}", timeout=5) as response:
+            image = response.read()
+            status = response.status
+            content_type = response.headers.get_content_type()
+
+        self.assertEqual(status, 200)
+        self.assertEqual(content_type, "image/png")
+        self.assertTrue(image.startswith(b"\x89PNG\r\n\x1a\n"))
+
+        with self.assertRaises(HTTPError) as ctx:
+            self.request("GET", "/assets/../app/server.py")
+        self.assertEqual(ctx.exception.code, 404)
+
     def test_equipment_fields_can_be_updated(self):
         status, data = self.request(
             "PATCH",

@@ -219,6 +219,8 @@ const BULLETIN_SETTINGS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const BULLETIN_SETTINGS_STORAGE_KEY = "snr.bulletin.settings.v1";
 const BULLETIN_EQUIPMENT_STORAGE_KEY = "snr.bulletin.equipment-filter.v1";
 const BULLETIN_EQUIPMENT_MODES = ["all", "custom"];
+const BULLETIN_FULLSCREEN_TOP_DEFAULT_HEIGHT = 0;
+const BULLETIN_FULLSCREEN_TOP_MAX_HEIGHT = 260;
 
 const FLOORPLAN_STORAGE_KEY = "snr.floorplan.placements.v1";
 const EQUIPMENT_DRAFT_ID = -1;
@@ -256,6 +258,7 @@ const state = {
   bulletinRangeSyncTimerId: null,
   bulletinEquipmentMode: "all",
   bulletinSelectedEquipmentIds: [],
+  bulletinTopRegionHeight: BULLETIN_FULLSCREEN_TOP_DEFAULT_HEIGHT,
   scheduleStart: startOfDay(new Date()),
   scheduleRangeStart: addMonths(startOfDay(new Date()), -SCHEDULE_EXTENSION_MONTHS),
   scheduleRangeEnd: addMonths(addMonths(startOfDay(new Date()), 1), SCHEDULE_EXTENSION_MONTHS),
@@ -357,6 +360,7 @@ function bindEvents() {
   document.addEventListener("fullscreenchange", handleBulletinFullscreenChange);
   document.addEventListener("visibilitychange", handleBulletinVisibilityChange);
   bindBulletinSettingsToggle();
+  bindBulletinTopResizeHandle();
 
   document.getElementById("reservationForm").addEventListener("submit", submitReservation);
   document.querySelector("#reservationForm select[name='equipment_id']").addEventListener("change", syncReservationEquipmentState);
@@ -671,6 +675,76 @@ function bindBulletinSettingsToggle() {
   };
   syncExpandedState();
   settings.addEventListener("toggle", syncExpandedState);
+}
+
+function isBulletinFullscreen() {
+  return document.fullscreenElement === document.getElementById("bulletinBoard");
+}
+
+function getBulletinTopNaturalHeight() {
+  return BULLETIN_FULLSCREEN_TOP_MAX_HEIGHT;
+}
+
+function setBulletinTopRegionHeight(height) {
+  const board = document.getElementById("bulletinBoard");
+  const region = document.getElementById("bulletinTopRegion");
+  const handle = document.getElementById("bulletinTopResizeHandle");
+  if (!board || !region || !handle) return;
+
+  const clampedHeight = Math.min(
+    Math.max(Math.round(Number(height) || 0), BULLETIN_FULLSCREEN_TOP_DEFAULT_HEIGHT),
+    BULLETIN_FULLSCREEN_TOP_MAX_HEIGHT,
+  );
+  state.bulletinTopRegionHeight = clampedHeight;
+  board.style.setProperty("--bulletin-top-height", `${clampedHeight}px`);
+
+  const collapsed = isBulletinFullscreen() && clampedHeight <= 0;
+  const handleText = collapsed ? "點擊展開設定區" : "點擊收合設定區";
+  handle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  handle.setAttribute("aria-label", handleText);
+  handle.setAttribute("title", handleText);
+  region.toggleAttribute("inert", collapsed);
+  if (collapsed) {
+    region.setAttribute("aria-hidden", "true");
+  } else {
+    region.removeAttribute("aria-hidden");
+  }
+}
+
+function syncBulletinTopRegionState(options = {}) {
+  const board = document.getElementById("bulletinBoard");
+  const region = document.getElementById("bulletinTopRegion");
+  if (!board || !region) return;
+
+  if (isBulletinFullscreen()) {
+    if (options.reset) {
+      state.bulletinTopRegionHeight = BULLETIN_FULLSCREEN_TOP_DEFAULT_HEIGHT;
+    }
+    setBulletinTopRegionHeight(state.bulletinTopRegionHeight);
+    return;
+  }
+
+  board.style.removeProperty("--bulletin-top-height");
+  region.removeAttribute("inert");
+  region.removeAttribute("aria-hidden");
+}
+
+function toggleBulletinTopRegion() {
+  const nextHeight = state.bulletinTopRegionHeight <= 0
+    ? getBulletinTopNaturalHeight()
+    : BULLETIN_FULLSCREEN_TOP_DEFAULT_HEIGHT;
+  setBulletinTopRegionHeight(nextHeight);
+  scheduleBulletinAutoScroll({ resetPosition: false });
+}
+
+function bindBulletinTopResizeHandle() {
+  const handle = document.getElementById("bulletinTopResizeHandle");
+  if (!handle) return;
+
+  handle.addEventListener("click", () => {
+    if (!isBulletinFullscreen()) return;
+    toggleBulletinTopRegion();
+  });
 }
 
 function syncBulletinRangeToToday() {
@@ -3401,6 +3475,7 @@ function renderReservationRequesterCategory() {
 }
 
 function handleBulletinViewportChange() {
+  syncBulletinTopRegionState();
   relayoutBulletinBoard({ preserveScroll: true });
 }
 
@@ -3422,6 +3497,7 @@ function relayoutBulletinBoard({ preserveScroll = false, resetAutoScroll = false
 }
 
 function handleBulletinFullscreenChange() {
+  syncBulletinTopRegionState({ reset: isBulletinFullscreen() });
   window.requestAnimationFrame(() => {
     window.requestAnimationFrame(() => {
       relayoutBulletinBoard({ resetAutoScroll: true });

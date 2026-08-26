@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulletin Responsive Preview</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f3f6fb;
+            --panel: #ffffff;
+            --panel-border: #cfd8e3;
+            --text: #1e293b;
+            --muted: #526072;
+            --active: #0f766e;
+            --active-contrast: #ecfeff;
+            --shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", "Noto Sans TC", sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(14, 165, 233, 0.14), transparent 28%),
+                linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+            color: var(--text);
+        }
+
+        main {
+            display: grid;
+            gap: 1rem;
+            padding: 1.5rem;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--panel-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow);
+        }
+
+        .toolbar {
+            display: grid;
+            gap: 1rem;
+            padding: 1.25rem;
+        }
+
+        .eyebrow {
+            margin: 0;
+            font-size: 0.85rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            color: var(--active);
+        }
+
+        h1 {
+            margin: 0.25rem 0 0;
+            font-size: clamp(1.5rem, 3vw, 2rem);
+        }
+
+        .description,
+        .device-meta,
+        .hint {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        .preset-button {
+            border: 1px solid var(--panel-border);
+            border-radius: 999px;
+            padding: 0.75rem 1rem;
+            background: #f8fafc;
+            color: var(--text);
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+        }
+
+        .preset-button[aria-pressed="true"] {
+            border-color: var(--active);
+            background: var(--active);
+            color: var(--active-contrast);
+        }
+
+        .preview-shell {
+            padding: 1rem;
+        }
+
+        .preview-scroll-region {
+            overflow: auto;
+            padding: 1rem;
+            border: 1px dashed #94a3b8;
+            border-radius: 16px;
+            background:
+                linear-gradient(90deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px) 0 0 / 24px 24px,
+                linear-gradient(rgba(148, 163, 184, 0.1) 1px, transparent 1px) 0 0 / 24px 24px,
+                #e2e8f0;
+            min-height: 70vh;
+        }
+
+        .device-frame {
+            display: block;
+            border: 1px solid #64748b;
+            border-radius: 18px;
+            background: white;
+            box-shadow: 0 24px 50px rgba(15, 23, 42, 0.16);
+        }
+
+        code {
+            font-family: "Cascadia Code", "Consolas", monospace;
+            font-size: 0.95em;
+        }
+
+        @media (max-width: 720px) {
+            main {
+                padding: 1rem;
+            }
+
+            .toolbar,
+            .preview-shell {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <section class="panel toolbar" aria-label="Responsive preview controls">
+            <div>
+                <p class="eyebrow">僅供本機 responsive 驗證</p>
+                <h1>公佈欄裝置預覽切換器</h1>
+            </div>
+            <p class="description">
+                這個頁面只提供本機 app server 驗證公佈欄畫面。下方 <code>iframe</code> 會直接載入
+                <code>/?view=bulletin#bulletinBoard</code>，並使用實際 CSS px viewport，不縮放 desktop 截圖。
+            </p>
+            <div class="controls" role="group" aria-label="裝置預覽尺寸">
+                <button type="button" class="preset-button" data-preset="mobile" aria-pressed="true">手機預覽</button>
+                <button type="button" class="preset-button" data-preset="tablet" aria-pressed="false">平板預覽</button>
+                <button type="button" class="preset-button" data-preset="desktop" aria-pressed="false">一般預覽</button>
+            </div>
+            <p class="device-meta" id="deviceMeta" aria-live="polite">目前尺寸：手機預覽 390 × 844</p>
+            <p class="hint">外框可捲動；若 iframe 比目前視窗大，請直接捲動外框檢查真實 responsive 排版。</p>
+        </section>
+
+        <section class="panel preview-shell" aria-label="Bulletin preview frame">
+            <div class="preview-scroll-region">
+                <iframe
+                    id="previewFrame"
+                    class="device-frame"
+                    title="本機公佈欄 responsive 預覽"
+                    src="/?view=bulletin#bulletinBoard"
+                    width="390"
+                    height="844"></iframe>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const PRESETS = {
+            mobile: { label: "手機預覽", width: 390, height: 844 },
+            tablet: { label: "平板預覽", width: 1024, height: 768 },
+            desktop: { label: "一般預覽", width: 1280, height: 720 },
+        };
+
+        const frame = document.getElementById("previewFrame");
+        const deviceMeta = document.getElementById("deviceMeta");
+        const presetButtons = Array.from(document.querySelectorAll("[data-preset]"));
+
+        function formatPresetMeta(preset) {
+            return `目前尺寸：${preset.label} ${preset.width} × ${preset.height}`;
+        }
+
+        function applyPreset(name) {
+            const preset = PRESETS[name];
+            if (!preset) {
+                return;
+            }
+            frame.width = String(preset.width);
+            frame.height = String(preset.height);
+            frame.style.width = `${preset.width}px`;
+            frame.style.height = `${preset.height}px`;
+            frame.dataset.deviceName = preset.label;
+            frame.dataset.viewportWidth = String(preset.width);
+            frame.dataset.viewportHeight = String(preset.height);
+            deviceMeta.textContent = formatPresetMeta(preset);
+            presetButtons.forEach((button) => {
+                const isActive = button.dataset.preset === name;
+                button.setAttribute("aria-pressed", isActive ? "true" : "false");
+            });
+        }
+
+        presetButtons.forEach((button) => {
+            button.addEventListener("click", () => applyPreset(button.dataset.preset));
+        });
+
+        applyPreset("mobile");
+    </script>
+</body>
+</html>

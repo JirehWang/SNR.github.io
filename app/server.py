@@ -8,14 +8,30 @@ from datetime import datetime
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT.parent
 DEFAULT_DB = ROOT.parent / "data" / "rlab_reservation.db"
 LOGGER = logging.getLogger(__name__)
-STATIC_FILES = {"/index.html", "/app.js", "/styles.css"}
+STATIC_FILES = {"/index.html", "/app.js", "/styles.css", "/preview.html"}
+STATIC_ASSETS_DIR = (STATIC_DIR / "assets").resolve()
+
+
+def is_allowed_static_path(path: str):
+    """Allow only the bundled frontend files and files inside the assets tree."""
+    if path in STATIC_FILES:
+        return True
+    decoded_path = unquote(path)
+    if not (decoded_path == "/assets" or decoded_path.startswith("/assets/")):
+        return False
+    candidate = (STATIC_DIR / decoded_path.lstrip("/")).resolve()
+    try:
+        candidate.relative_to(STATIC_ASSETS_DIR)
+    except ValueError:
+        return False
+    return candidate.is_file()
 
 
 class App:
@@ -241,7 +257,7 @@ class Handler(SimpleHTTPRequestHandler):
             else:
                 if parsed.path == "/":
                     self.path = "/index.html"
-                elif parsed.path not in STATIC_FILES:
+                elif not is_allowed_static_path(parsed.path):
                     raise ApiError(404, "Static file not found")
                 super().do_GET()
         except ApiError as exc:
