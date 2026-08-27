@@ -334,6 +334,10 @@ button.ghost {
   padding: 24px;
 }
 
+body.bulletin-preview-fullscreen-active {
+  overflow: hidden;
+}
+
 .bulletin-view-active .bulletin-panel,
 :fullscreen .bulletin-panel,
 .bulletin-panel:fullscreen {
@@ -1141,7 +1145,7 @@ textarea:focus {
 }
 
 .bulletin-row {
-  min-height: 108px;
+  min-height: var(--bulletin-row-height, 108px);
   scroll-snap-align: start;
   scroll-snap-stop: always;
 }
@@ -1281,7 +1285,7 @@ textarea:focus {
 }
 
 .bulletin-lane {
-  min-height: 108px;
+  min-height: var(--bulletin-row-height, 108px);
 }
 
 .gantt-bar {
@@ -1969,6 +1973,23 @@ th {
   overflow: hidden;
 }
 
+.bulletin-panel.is-preview-fullscreen {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  border-radius: 0;
+  border: 0;
+  outline: 1px solid #64748b;
+  outline-offset: -1px;
+  padding: 24px;
+  background: #f8fbff;
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
 :fullscreen .bulletin-top-region,
 .bulletin-panel:fullscreen .bulletin-top-region {
   flex: 0 0 var(--bulletin-top-height, 0px);
@@ -1977,8 +1998,30 @@ th {
   transition: height 140ms ease, flex-basis 140ms ease;
 }
 
+.bulletin-panel.is-preview-fullscreen .bulletin-top-region {
+  flex: 0 0 var(--bulletin-top-height, 0px);
+  height: var(--bulletin-top-height, 0px);
+  overflow: auto;
+  transition: height 140ms ease, flex-basis 140ms ease;
+}
+
 :fullscreen .bulletin-top-resize-handle,
 .bulletin-panel:fullscreen .bulletin-top-resize-handle {
+  display: flex;
+  flex: 0 0 22px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 22px;
+  margin: 0 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.bulletin-panel.is-preview-fullscreen .bulletin-top-resize-handle {
   display: flex;
   flex: 0 0 22px;
   align-items: center;
@@ -2002,8 +2045,19 @@ th {
   outline: none;
 }
 
+.bulletin-panel.is-preview-fullscreen .bulletin-top-resize-handle:hover,
+.bulletin-panel.is-preview-fullscreen .bulletin-top-resize-handle:focus-visible {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  outline: none;
+}
+
 :fullscreen .bulletin-top-resize-handle:focus-visible,
 .bulletin-panel:fullscreen .bulletin-top-resize-handle:focus-visible {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.24);
+}
+
+.bulletin-panel.is-preview-fullscreen .bulletin-top-resize-handle:focus-visible {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.24);
 }
 
@@ -2015,8 +2069,21 @@ th {
   background: #64748b;
 }
 
+.bulletin-panel.is-preview-fullscreen .bulletin-top-resize-handle span {
+  width: 52px;
+  height: 4px;
+  border-radius: 999px;
+  background: #64748b;
+}
+
 :fullscreen .bulletin-wrap,
 .bulletin-panel:fullscreen .bulletin-wrap {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.bulletin-panel.is-preview-fullscreen .bulletin-wrap {
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
@@ -2063,6 +2130,62 @@ th {
 
   .config-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 561px) and (max-width: 1080px) {
+  .bulletin-wrap {
+    height: clamp(320px, calc(100vh - 228px), 72vh);
+  }
+
+  .bulletin-row,
+  .bulletin-lane {
+    min-height: max(var(--bulletin-row-height, 80px), 80px);
+  }
+
+  .bulletin-chart .gantt-equipment-label {
+    gap: 2px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .bulletin-chart .equipment-zoom-btn {
+    font-size: 13px;
+    line-height: 1.15;
+  }
+
+  .bulletin-chart .gantt-equipment-label span {
+    font-size: 11px;
+    line-height: 1.1;
+  }
+
+  .bulletin-bar {
+    padding: 6px 8px 5px;
+  }
+
+  .bulletin-bar > .bulletin-bar-info {
+    display: grid;
+    align-content: center;
+    gap: 1px;
+    width: 100%;
+    max-height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .bulletin-bar strong {
+    font-size: 14px;
+    line-height: 1.2;
+  }
+
+  .bulletin-bar span {
+    font-size: 12px;
+    line-height: 1.15;
+  }
+
+  .bulletin-bar em {
+    font-size: 10px;
+    line-height: 1.1;
   }
 }
 

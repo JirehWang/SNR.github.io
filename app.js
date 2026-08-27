@@ -215,6 +215,9 @@ const BULLETIN_MIN_EQUIPMENT_COLUMN_WIDTH = 136;
 const BULLETIN_RANGE_DAY_OPTIONS = [7, 14, 28];
 const BULLETIN_DEFAULT_RANGE_DAYS = 28;
 const BULLETIN_SETTINGS_COOKIE_NAME = "snr_bulletin_settings_v1";
+const BULLETIN_TABLET_BREAKPOINT_MIN = 561;
+const BULLETIN_TABLET_BREAKPOINT_MAX = 1080;
+const BULLETIN_PREVIEW_PARAM = "preview";
 const BULLETIN_SETTINGS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const BULLETIN_SETTINGS_STORAGE_KEY = "snr.bulletin.settings.v1";
 const BULLETIN_EQUIPMENT_STORAGE_KEY = "snr.bulletin.equipment-filter.v1";
@@ -259,6 +262,7 @@ const state = {
   bulletinEquipmentMode: "all",
   bulletinSelectedEquipmentIds: [],
   bulletinTopRegionHeight: BULLETIN_FULLSCREEN_TOP_DEFAULT_HEIGHT,
+  bulletinPreviewFullscreen: false,
   scheduleStart: startOfDay(new Date()),
   scheduleRangeStart: addMonths(startOfDay(new Date()), -SCHEDULE_EXTENSION_MONTHS),
   scheduleRangeEnd: addMonths(addMonths(startOfDay(new Date()), 1), SCHEDULE_EXTENSION_MONTHS),
@@ -358,6 +362,7 @@ function bindEvents() {
   document.getElementById("bulletinScrollDuration").addEventListener("change", updateBulletinScrollSettings);
   window.addEventListener("resize", handleBulletinViewportChange);
   document.addEventListener("fullscreenchange", handleBulletinFullscreenChange);
+  document.addEventListener("keydown", handleBulletinPreviewFullscreenKeydown);
   document.addEventListener("visibilitychange", handleBulletinVisibilityChange);
   bindBulletinSettingsToggle();
   bindBulletinTopResizeHandle();
@@ -677,8 +682,30 @@ function bindBulletinSettingsToggle() {
   settings.addEventListener("toggle", syncExpandedState);
 }
 
-function isBulletinFullscreen() {
+function isBulletinPreviewMode() {
+  return new URLSearchParams(window.location.search).get(BULLETIN_PREVIEW_PARAM) === "1";
+}
+
+function isBulletinNativeFullscreen() {
   return document.fullscreenElement === document.getElementById("bulletinBoard");
+}
+
+function isBulletinFullscreen() {
+  return isBulletinNativeFullscreen() || state.bulletinPreviewFullscreen;
+}
+
+function setBulletinPreviewFullscreen(active) {
+  if (!isBulletinPreviewMode()) return false;
+
+  const board = document.getElementById("bulletinBoard");
+  if (!board) return false;
+
+  state.bulletinPreviewFullscreen = Boolean(active);
+  board.classList.toggle("is-preview-fullscreen", state.bulletinPreviewFullscreen);
+  document.body.classList.toggle("bulletin-preview-fullscreen-active", state.bulletinPreviewFullscreen);
+  syncBulletinTopRegionState({ reset: state.bulletinPreviewFullscreen });
+  relayoutBulletinBoard({ resetAutoScroll: true });
+  return true;
 }
 
 function getBulletinTopNaturalHeight() {
@@ -2078,8 +2105,13 @@ function renderGanttSurface({ scaleId, chartId, labelId, variant, range = getWee
       lane.style.minHeight = `${ganttMetrics.rowHeight}px`;
       lane.style.height = `${ganttMetrics.rowHeight}px`;
     } else if (ganttMetrics) {
-      lane.style.minHeight = `${ganttMetrics.rowHeight}px`;
-      lane.style.height = `${ganttMetrics.rowHeight}px`;
+      if (isBulletinTabletViewport()) {
+        row.style.setProperty("--bulletin-row-height", `${ganttMetrics.rowHeight}px`);
+        lane.style.setProperty("--bulletin-row-height", `${ganttMetrics.rowHeight}px`);
+      } else {
+        lane.style.minHeight = `${ganttMetrics.rowHeight}px`;
+        lane.style.height = `${ganttMetrics.rowHeight}px`;
+      }
     }
 
     visibleStackedReservations.forEach((stacked) => {
@@ -2277,15 +2309,22 @@ function getDefaultGanttMetrics(stackCount = 1) {
 
 function getBulletinGanttMetrics(stackCount = 1) {
   const levels = Math.max(Number(stackCount) || 1, 1);
-  const barHeight = 76;
-  const gap = 10;
-  const top = 14;
+  const isTabletViewport = isBulletinTabletViewport();
+  const barHeight = isTabletViewport ? 58 : 76;
+  const gap = isTabletViewport ? 8 : 10;
+  const top = isTabletViewport ? 11 : 14;
   return {
     rowHeight: top * 2 + barHeight * levels + gap * (levels - 1),
     barHeight,
     gap,
     top,
   };
+}
+
+function isBulletinTabletViewport() {
+  return window.matchMedia(
+    `(min-width: ${BULLETIN_TABLET_BREAKPOINT_MIN}px) and (max-width: ${BULLETIN_TABLET_BREAKPOINT_MAX}px)`,
+  ).matches;
 }
 
 function getGanttLaneSummary(stackedReservations, visibleStackedReservations) {
@@ -2364,9 +2403,11 @@ function getMainGanttBarMarkup(reservation, textMode) {
 function getBulletinGanttBarMarkup(reservation) {
   const view = getReservationViewModel(reservation);
   return `
-    <strong>${escapeHtml(view.projectName)}</strong>
-    <span>${escapeHtml(view.requesterName)}</span>
-    <em>${escapeHtml(view.timeRange)}</em>
+    <span class="gantt-bar-info bulletin-bar-info">
+      <strong>${escapeHtml(view.projectName)}</strong>
+      <span>${escapeHtml(view.requesterName)}</span>
+      <em>${escapeHtml(view.timeRange)}</em>
+    </span>
   `;
 }
 
@@ -3489,7 +3530,7 @@ function relayoutBulletinBoard({ preserveScroll = false, resetAutoScroll = false
   if (preserveScroll && !resetAutoScroll) {
     wrap.scrollTop = Math.min(previousScrollTop, Math.max(wrap.scrollHeight - wrap.clientHeight, 0));
   }
-  if (document.fullscreenElement) {
+  if (isBulletinFullscreen()) {
     scheduleBulletinAutoScroll({ resetPosition: resetAutoScroll });
   } else {
     stopBulletinAutoScroll({ resetPosition: resetAutoScroll });
@@ -3505,6 +3546,12 @@ function handleBulletinFullscreenChange() {
   });
 }
 
+function handleBulletinPreviewFullscreenKeydown(event) {
+  if (event.key !== "Escape" || !state.bulletinPreviewFullscreen) return;
+  event.preventDefault();
+  setBulletinPreviewFullscreen(false);
+}
+
 function scheduleBulletinAutoScroll(options = {}) {
   return scheduleBulletinAutoScrollWithOptions(options);
 }
@@ -3516,7 +3563,7 @@ function scheduleBulletinAutoScrollWithOptions(options = {}) {
   const wrap = document.querySelector(".bulletin-wrap");
   if (!wrap) return;
   syncBulletinStickyOffset(wrap);
-  if (!document.fullscreenElement) return;
+  if (!isBulletinFullscreen()) return;
 
   const overflow = wrap.scrollHeight - wrap.clientHeight;
   if (overflow <= 8) {
@@ -3627,12 +3674,18 @@ function stepBulletinAutoScroll() {
 function openBulletinWindow() {
   const url = new URL(window.location.href);
   url.searchParams.set("view", "bulletin");
+  url.searchParams.delete(BULLETIN_PREVIEW_PARAM);
   window.open(url.toString(), "_blank", "noopener,noreferrer");
 }
 
 async function openBulletinFullscreen() {
   const board = document.getElementById("bulletinBoard");
   if (!board) return;
+
+  if (isBulletinPreviewMode()) {
+    setBulletinPreviewFullscreen(!state.bulletinPreviewFullscreen);
+    return;
+  }
 
   if (!document.fullscreenElement) {
     await board.requestFullscreen();

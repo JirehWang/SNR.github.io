@@ -53,7 +53,7 @@ class ApiTestCase(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertIn("僅供本機 responsive 驗證", html)
-        self.assertIn('src="/?view=bulletin#bulletinBoard"', html)
+        self.assertIn('src="/?view=bulletin&amp;preview=1#bulletinBoard"', html)
 
         with self.assertRaises(HTTPError) as ctx:
             self.request("GET", "/README.md")

@@ -13,7 +13,7 @@ class StaticUiTestCase(unittest.TestCase):
 
         self.assertIn("僅供本機 responsive 驗證", preview)
         self.assertIn("公佈欄裝置預覽切換器", preview)
-        self.assertIn('src="/?view=bulletin#bulletinBoard"', preview)
+        self.assertIn('src="/?view=bulletin&amp;preview=1#bulletinBoard"', preview)
         self.assertIn('data-preset="mobile"', preview)
         self.assertIn('data-preset="tablet"', preview)
         self.assertIn('data-preset="desktop"', preview)

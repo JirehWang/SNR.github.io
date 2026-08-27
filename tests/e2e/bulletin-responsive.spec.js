@@ -1,6 +1,11 @@
 const { test, expect } = require("@playwright/test");
 
 const ACTIVE_EQUIPMENT_COUNT = 21;
+const PREVIEW_PRESETS = {
+  mobile: { label: "手機預覽", width: 390, height: 844 },
+  tablet: { label: "平板預覽", width: 1024, height: 768 },
+  desktop: { label: "一般預覽", width: 1280, height: 720 },
+};
 
 const equipmentRows = Array.from({ length: ACTIVE_EQUIPMENT_COUNT }, (_, index) => ({
   id: index + 1,
@@ -26,7 +31,7 @@ const equipmentRows = Array.from({ length: ACTIVE_EQUIPMENT_COUNT }, (_, index) 
   equipment_spec: "",
 });
 
-async function mockSupabase(page) {
+async function mockSupabase(page, tables = {}) {
   await page.route(/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2/, async (route) => {
     await route.fulfill({
       contentType: "application/javascript",
@@ -37,6 +42,7 @@ async function mockSupabase(page) {
             equipment: ${JSON.stringify(equipmentRows)},
             equipment_floorplan_placements: [],
             reservations: [],
+            ...${JSON.stringify(tables)},
           };
 
           function createQuery(table) {
@@ -71,6 +77,8 @@ async function getBulletinMetrics(page) {
     const wrap = document.querySelector(".bulletin-wrap");
     const scale = document.querySelector(".bulletin-scale");
     const chart = document.querySelector(".bulletin-chart");
+    const rows = Array.from(document.querySelectorAll(".bulletin-row"));
+    const bars = Array.from(document.querySelectorAll(".bulletin-bar"));
     const settings = document.querySelector("#bulletinSettings");
     const settingsToggle = document.querySelector("#bulletinSettingsToggle");
     const fullscreenButton = document.querySelector("#bulletinFullscreenBtn");
@@ -80,6 +88,9 @@ async function getBulletinMetrics(page) {
     const settingsToggleRect = settingsToggle.getBoundingClientRect();
     const fullscreenButtonRect = fullscreenButton.getBoundingClientRect();
     const topRegionRect = topRegion.getBoundingClientRect();
+    const board = document.querySelector("#bulletinBoard");
+    const boardStyle = window.getComputedStyle(board);
+    const previewFullscreenActive = board.classList.contains("is-preview-fullscreen");
     const resizeHandleRect = resizeHandle.getBoundingClientRect();
     const titleRowRect = topRegion.querySelector(".section-title").getBoundingClientRect();
     const titleCopyRect = topRegion.querySelector(".bulletin-title-copy").getBoundingClientRect();
@@ -88,18 +99,30 @@ async function getBulletinMetrics(page) {
     const legendMatrixRect = legend.querySelector(".bulletin-legend-matrix").getBoundingClientRect();
     const weekControlsRect = topRegion.querySelector(".week-controls").getBoundingClientRect();
     const dateNavRect = document.querySelector("#bulletinMonthLabel").closest(".date-navigation").getBoundingClientRect();
+    const wrapRect = wrap.getBoundingClientRect();
+    const scaleRect = scale.getBoundingClientRect();
     const rectsOverlap = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-    const topRegionVisible = document.fullscreenElement?.id !== "bulletinBoard" || topRegionRect.height > 1;
+    const topRegionVisible = (document.fullscreenElement?.id !== "bulletinBoard" && !previewFullscreenActive) || topRegionRect.height > 1;
     const legendMatrixDots = Array.from(legend.querySelectorAll(".bulletin-legend-matrix .legend-swatch"));
+    const isFullyVisibleRow = (row) => {
+      const rowRect = row.getBoundingClientRect();
+      return rowRect.top >= scaleRect.bottom - 1 && rowRect.bottom <= wrapRect.bottom + 1;
+    };
     return {
       dayCount: document.querySelectorAll(".bulletin-scale .gantt-day").length,
-      rowCount: document.querySelectorAll(".bulletin-row").length,
+      rowCount: rows.length,
+      fullyVisibleRowCount: rows.filter((row) => isFullyVisibleRow(row)).length,
+      firstFiveRowsFullyVisible: rows.slice(0, 5).every((row) => isFullyVisibleRow(row)),
       chartWidth: chart.getBoundingClientRect().width,
       scaleStyleWidth: scale.style.width,
       wrapClientHeight: wrap.clientHeight,
       wrapScrollHeight: wrap.scrollHeight,
       wrapClientWidth: wrap.clientWidth,
       wrapScrollWidth: wrap.scrollWidth,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      tabletMediaMatches: window.matchMedia("(min-width: 561px) and (max-width: 1080px)").matches,
+      desktopMediaMatches: window.matchMedia("(min-width: 1081px)").matches,
       controlsVisible: settings.open,
       settingsOpen: settings.open,
       settingsExpanded: settingsToggle.getAttribute("aria-expanded"),
@@ -137,6 +160,11 @@ async function getBulletinMetrics(page) {
       legendMatrixWidth: legendMatrixRect.width,
       fullscreenButtonVisible: topRegionVisible && fullscreenButtonRect.top >= 0 && fullscreenButtonRect.bottom <= window.innerHeight,
       fullscreenElementId: document.fullscreenElement?.id || "",
+      previewFullscreenActive,
+      boardOutlineWidth: boardStyle.outlineWidth,
+      boardOutlineStyle: boardStyle.outlineStyle,
+      boardOutlineColor: boardStyle.outlineColor,
+      boardOutlineOffset: boardStyle.outlineOffset,
       monthLabel: document.querySelector("#bulletinMonthLabel").textContent,
       rangeValue: document.querySelector("#bulletinRangeSelect").value,
       rangeOptions: Array.from(document.querySelectorAll("#bulletinRangeSelect option")).map((option) => ({
@@ -161,6 +189,17 @@ async function getBulletinMetrics(page) {
             && childRect.left >= dayRect.left - 1
             && childRect.right <= dayRect.right + 1;
         });
+      }),
+      barTextContained: bars.every((bar) => {
+        const barRect = bar.getBoundingClientRect();
+        return bar.scrollHeight <= bar.clientHeight + 1
+          && Array.from(bar.querySelectorAll(".bulletin-bar-info > *")).every((line) => {
+            const lineRect = line.getBoundingClientRect();
+            return lineRect.top >= barRect.top - 1
+              && lineRect.bottom <= barRect.bottom + 1
+              && lineRect.left >= barRect.left - 1
+              && lineRect.right <= barRect.right + 1;
+          });
       }),
     };
   });
@@ -187,7 +226,7 @@ async function getExpectedBulletinRange(page, dayCount, startOffset = 0) {
 async function openMockedBulletin(page, viewport, options = {}) {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  await mockSupabase(page);
+  await mockSupabase(page, options.mockTables);
   if (options.clockTime) {
     await page.clock.install({ time: options.clockTime });
   }
@@ -196,6 +235,28 @@ async function openMockedBulletin(page, viewport, options = {}) {
   await expect(page.locator("#connectionBadge")).toHaveText("已連線");
   await page.locator("#bulletinBoard").scrollIntoViewIfNeeded();
   return pageErrors;
+}
+
+async function openMockedBulletinPreview(page, presetName = "tablet", options = {}) {
+  const pageErrors = [];
+  const preset = PREVIEW_PRESETS[presetName];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await mockSupabase(page, options.mockTables);
+  if (options.clockTime) {
+    await page.clock.install({ time: options.clockTime });
+  }
+  await page.setViewportSize(options.hostViewport || { width: 1440, height: 980 });
+  await page.goto("/preview.html");
+  await page.locator(`[data-preset="${presetName}"]`).click();
+
+  const iframe = page.locator("#previewFrame");
+  await expect(iframe).toHaveAttribute("data-viewport-width", String(preset.width));
+  await expect(iframe).toHaveAttribute("data-viewport-height", String(preset.height));
+  const frameHandle = await iframe.elementHandle();
+  const frame = await frameHandle.contentFrame();
+  await expect(frame.locator("#connectionBadge")).toHaveText("已連線");
+  await frame.locator("#bulletinBoard").scrollIntoViewIfNeeded();
+  return { pageErrors, frame, preset };
 }
 
 async function expandBulletinSettings(page) {
@@ -262,6 +323,8 @@ test("bulletin tablet landscape defaults to four weeks and keeps active equipmen
   expect(metrics.legendTotalDotCount).toBe(8);
   expect(metrics.legendMatrixWidth).toBeLessThanOrEqual(220);
   expect(metrics.rangeValue).toBe("28");
+  expect(metrics.firstFiveRowsFullyVisible).toBe(true);
+  expect(metrics.fullyVisibleRowCount).toBeGreaterThanOrEqual(5);
   expect(metrics.rangeOptions).toEqual([
     { value: "7", text: "1 週" },
     { value: "14", text: "2 週" },
@@ -287,6 +350,35 @@ test("bulletin tablet landscape defaults to four weeks and keeps active equipmen
   expect(collapsedMetrics.controlsVisible).toBe(false);
   expect(collapsedMetrics.settingsPanelVisible).toBe(false);
   expect(collapsedMetrics.settingsToggleVisible).toBe(true);
+  expect(pageErrors).toEqual([]);
+});
+
+test("bulletin tablet bars keep three reservation lines inside the compact tablet row height", async ({ page }) => {
+  const pageErrors = await openMockedBulletin(page, { width: 1024, height: 768 }, {
+    clockTime: new Date("2026-08-27T09:00:00+08:00"),
+    mockTables: {
+      reservations: [
+        {
+          id: 1,
+          equipment_id: 1,
+          equipment_name: "Chamber 01",
+          equipment_category: "TEMP",
+          project_name: "Thermal Reliability Qualification",
+          requester_name: "Alex Chen",
+          requester_email: "alex.chen@example.com",
+          start_time: "2026-08-27T09:00:00+08:00",
+          end_time: "2026-08-27T18:00:00+08:00",
+          status: "reserved",
+          purpose: "",
+        },
+      ],
+    },
+  });
+
+  const metrics = await getBulletinMetrics(page);
+  expect(metrics.rowCount).toBe(ACTIVE_EQUIPMENT_COUNT);
+  expect(metrics.firstFiveRowsFullyVisible).toBe(true);
+  expect(metrics.barTextContained).toBe(true);
   expect(pageErrors).toEqual([]);
 });
 
@@ -551,6 +643,52 @@ test("bulletin fullscreenchange rerenders stale tablet-width gantt columns", asy
   expect(metrics.wrapScrollHeight).toBeGreaterThan(metrics.wrapClientHeight);
   expect(metrics.chartWidth).toBeLessThanOrEqual(metrics.wrapClientWidth + 2);
   expect(metrics.wrapScrollWidth).toBeLessThanOrEqual(metrics.wrapClientWidth + 2);
+  expect(pageErrors).toEqual([]);
+});
+
+test("preview tablet fullscreen keeps the iframe CSS viewport and tablet layout", async ({ page }) => {
+  const { pageErrors, frame, preset } = await openMockedBulletinPreview(page, "tablet");
+
+  const before = await getBulletinMetrics(frame);
+  expect(before.viewportWidth).toBe(preset.width);
+  expect(before.viewportHeight).toBe(preset.height);
+  expect(before.tabletMediaMatches).toBe(true);
+  expect(before.desktopMediaMatches).toBe(false);
+  expect(before.previewFullscreenActive).toBe(false);
+  expect(before.fullscreenElementId).toBe("");
+  expect(before.boardOutlineStyle).toBe("none");
+
+  await frame.locator("#bulletinFullscreenBtn").click();
+  await expect.poll(async () => (await getBulletinMetrics(frame)).previewFullscreenActive).toBe(true);
+
+  const fullscreen = await getBulletinMetrics(frame);
+  expect(fullscreen.viewportWidth).toBe(preset.width);
+  expect(fullscreen.viewportHeight).toBe(preset.height);
+  expect(fullscreen.tabletMediaMatches).toBe(true);
+  expect(fullscreen.desktopMediaMatches).toBe(false);
+  expect(fullscreen.fullscreenElementId).toBe("");
+  expect(fullscreen.boardOutlineWidth).toBe("1px");
+  expect(fullscreen.boardOutlineStyle).toBe("solid");
+  expect(fullscreen.boardOutlineColor).toBe("rgb(100, 116, 139)");
+  expect(fullscreen.boardOutlineOffset).toBe("-1px");
+  expect(fullscreen.firstFiveRowsFullyVisible).toBe(true);
+  expect(fullscreen.fullyVisibleRowCount).toBeGreaterThanOrEqual(5);
+  expect(fullscreen.wrapScrollHeight).toBeGreaterThan(fullscreen.wrapClientHeight);
+
+  await frame.locator("#bulletinTopResizeHandle").click();
+  await expect.poll(async () => (await getBulletinMetrics(frame)).topRegionHeight).toBe(260);
+  await frame.locator("#bulletinFullscreenBtn").click();
+  await expect.poll(async () => (await getBulletinMetrics(frame)).previewFullscreenActive).toBe(false);
+
+  const after = await getBulletinMetrics(frame);
+  expect(after.viewportWidth).toBe(preset.width);
+  expect(after.viewportHeight).toBe(preset.height);
+  expect(after.tabletMediaMatches).toBe(true);
+  expect(after.desktopMediaMatches).toBe(false);
+  expect(after.boardOutlineStyle).toBe("none");
+  await expect(page.locator("#previewFrame")).toHaveAttribute("data-viewport-width", String(preset.width));
+  await expect(page.locator("#previewFrame")).toHaveAttribute("data-viewport-height", String(preset.height));
+  await expect(page.locator('[data-preset="tablet"]')).toHaveAttribute("aria-pressed", "true");
   expect(pageErrors).toEqual([]);
 });
 

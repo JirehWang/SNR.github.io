@@ -22,6 +22,12 @@
 
 ## Recent Entries
 
+### 2026-08-27
+
+- Focus: Preview iframe bulletin fullscreen regression.
+- Changed: Kept `preview.html` on a local-only `preview=1` bulletin entry, retained the iframe-scoped preview fullscreen simulation in `app.js`/`styles.css`, and ensured `openBulletinWindow()` strips the preview marker so the direct bulletin page still uses native Fullscreen API.
+- Verification: `node --check app.js`, targeted Python static/API tests (27/27), and the bulletin preview/native fullscreen Playwright regressions (14/14) passed.
+
 ### 2026-08-14
 
 - Focus: Equipment label source sync and prototype-local placement export.
