@@ -339,6 +339,13 @@
                 <p>管理預約時可快速帶入的申請人、Email 與預設部門。</p>
               </div>
             </div>
+            <div class="requester-list-toolbar">
+              <label for="requesterSearchInput">
+                搜尋使用者
+                <input id="requesterSearchInput" type="search" placeholder="輸入姓名或 Email" autocomplete="off" aria-controls="requesterSummary">
+              </label>
+              <p id="requesterResultCount" class="requester-result-count" role="status" aria-live="polite"></p>
+            </div>
             <div id="requesterSummary" class="summary-grid"></div>
           </section>
 

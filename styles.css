@@ -707,8 +707,69 @@ body.bulletin-preview-fullscreen-active {
 }
 
 .requester-card {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px 14px;
   border-left-color: #0ea5e9;
+}
+
+.requester-card-content {
+  min-width: 0;
+}
+
+.requester-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.requester-card-heading .equipment-state {
+  margin: 0;
+}
+
+.requester-card .equipment-card-meta {
+  margin-top: 6px;
+}
+
+.requester-card-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.requester-card-actions > button {
+  box-sizing: border-box;
+  width: min(64px, 100%);
+  min-width: min(64px, 100%);
+  height: 34px;
+  min-height: 34px;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.requester-list-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.requester-list-toolbar label {
+  max-width: 560px;
+}
+
+.requester-result-count {
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .equipment-edit-btn {
@@ -2278,6 +2339,23 @@ th {
 
   .equipment-card-actions {
     justify-items: start;
+  }
+
+  .requester-card {
+    grid-template-columns: 1fr;
+  }
+
+  .requester-card-actions {
+    justify-content: flex-start;
+  }
+
+  .requester-list-toolbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .requester-result-count {
+    margin: 0;
   }
 
   .bulletin-title-copy,

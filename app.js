@@ -255,6 +255,7 @@ const state = {
   savedFloorplanPlacements: [],
   reservations: [],
   requesters: [],
+  requesterSearchTerm: "",
   weekStart: startOfWeek(new Date()),
   bulletinRangeStart: startOfDay(new Date()),
   bulletinRangeDays: BULLETIN_DEFAULT_RANGE_DAYS,
@@ -415,6 +416,7 @@ function bindEvents() {
   document.getElementById("requesterForm").addEventListener("input", markRequesterFormDirty);
   document.getElementById("requesterCancelBtn").addEventListener("click", cancelRequesterEdit);
   document.getElementById("requesterResetBtn").addEventListener("click", resetRequesterForm);
+  document.getElementById("requesterSearchInput").addEventListener("input", handleRequesterSearch);
   document.querySelector("#requesterForm input[name='name']").addEventListener("input", syncRequesterEmailSuggestion);
   document.querySelector("#requesterForm input[name='email']").addEventListener("input", markRequesterEmailManual);
 
@@ -1179,6 +1181,19 @@ function renderRequesterOptions() {
     .filter((item) => item.is_active)
     .map((item) => `<option value="${escapeHtml(item.email)}"></option>`)
     .join("");
+}
+
+function handleRequesterSearch(event) {
+  state.requesterSearchTerm = String(event.currentTarget.value || "");
+  renderRequesterSummary();
+}
+
+function getFilteredRequesters() {
+  const query = String(state.requesterSearchTerm || "").trim().toLowerCase();
+  if (!query) return state.requesters;
+
+  return state.requesters.filter((item) => [item.name, item.email]
+    .some((value) => String(value || "").toLowerCase().includes(query)));
 }
 
 function renderConnectionState(forcedState = null) {
@@ -2708,14 +2723,14 @@ function unlockReservationEdit(reservation) {
   }
 
   setReservationEditUnlocked(true);
-  message.textContent = "已解鎖，可修改專案名稱與縮短預約時間。";
+  message.textContent = "已解鎖，可修改專案名稱，並可縮短或延長預約時間（延長受同設備後續有效預約限制）。";
 }
 
 function emailMatchesReservation(email, reservation) {
   return String(email || "").trim().toLowerCase() === String(reservation.requester_email || "").trim().toLowerCase();
 }
 
-function validateShortenedReservationWindow(reservation, startIso, endIso) {
+function validateReservationEditWindow(reservation, startIso, endIso) {
   const originalStart = new Date(reservation.start_time).getTime();
   const originalEnd = new Date(reservation.end_time).getTime();
   const nextStart = new Date(startIso).getTime();
@@ -2727,9 +2742,77 @@ function validateShortenedReservationWindow(reservation, startIso, endIso) {
   if (nextEnd <= nextStart) {
     throw new Error("結束時間必須晚於開始時間。");
   }
-  if (nextStart < originalStart || nextEnd > originalEnd) {
-    throw new Error("預約時間只能縮短，不能早於原開始時間或晚於原結束時間。");
+  if (nextStart < originalStart) {
+    throw new Error("預約開始時間不能早於原開始時間。");
   }
+}
+
+// 保留既有 helper 名稱，讓舊有靜態測試與呼叫點繼續相容；編輯現在也允許延長結束時間。
+function validateShortenedReservationWindow(reservation, startIso, endIso) {
+  return validateReservationEditWindow(reservation, startIso, endIso);
+}
+
+function getReservationExtensionConflict(reservation, startIso, endIso, laterReservations) {
+  const originalEnd = new Date(reservation.end_time).getTime();
+  const nextStart = new Date(startIso).getTime();
+  const nextEnd = new Date(endIso).getTime();
+  const extensionStart = Math.max(originalEnd, nextStart);
+
+  if (!Number.isFinite(originalEnd) || !Number.isFinite(nextStart) || !Number.isFinite(nextEnd)) return null;
+  if (nextEnd <= originalEnd || extensionStart >= nextEnd) return null;
+
+  const normalized = (laterReservations || [])
+    .filter((item) => String(item.id) !== String(reservation.id))
+    .filter((item) => item.status !== "cancelled" && item.status !== "checked_out")
+    .map((item) => ({
+      reservation: item,
+      startTime: new Date(item.start_time).getTime(),
+      endTime: new Date(item.end_time).getTime(),
+    }))
+    .filter((item) => Number.isFinite(item.startTime)
+      && Number.isFinite(item.endTime)
+      && item.endTime > item.startTime
+      && item.startTime < nextEnd
+      && item.endTime > extensionStart);
+
+  if (normalized.length === 0) return null;
+
+  normalized.sort((a, b) => a.startTime - b.startTime || a.endTime - b.endTime);
+  const earliestConflictStart = Math.min(...normalized.map((item) => item.startTime));
+  const maxAllowedEnd = Math.max(extensionStart, earliestConflictStart);
+  return {
+    reservation: normalized[0].reservation,
+    conflictStart: new Date(maxAllowedEnd),
+    maxAllowedEnd: new Date(maxAllowedEnd),
+  };
+}
+
+async function findReservationExtensionConflict(reservation, startIso, endIso) {
+  const originalEnd = new Date(reservation.end_time).getTime();
+  const nextEnd = new Date(endIso).getTime();
+  if (!Number.isFinite(originalEnd) || !Number.isFinite(nextEnd) || nextEnd <= originalEnd) return null;
+
+  const { data: laterReservations, error: conflictError } = await state.client
+    .from("reservations")
+    .select("id, equipment_id, requester_name, project_name, start_time, end_time, status")
+    .eq("equipment_id", reservation.equipment_id)
+    .neq("id", reservation.id)
+    .neq("status", "cancelled")
+    .neq("status", "checked_out")
+    .lt("start_time", endIso)
+    .gt("end_time", startIso)
+    .order("start_time", { ascending: true })
+    .order("end_time", { ascending: true });
+
+  assertNoError(conflictError, "讀取預約衝突失敗");
+  return getReservationExtensionConflict(reservation, startIso, endIso, laterReservations);
+}
+
+function formatReservationExtensionConflictMessage(conflict) {
+  const projectName = conflict?.reservation?.project_name || `預約 #${conflict?.reservation?.id || "未知"}`;
+  const conflictStart = formatDateTime(conflict.conflictStart);
+  const maxAllowedEnd = formatDateTime(conflict.maxAllowedEnd);
+  return `無法預約／無法延長：同一設備的後續有效專案「${projectName}」將於 ${conflictStart} 造成延長時段衝突。最多可到 ${maxAllowedEnd}；結束時間等於後續專案開始時間不算重疊。`;
 }
 
 async function saveReservationEdit(reservation) {
@@ -2756,6 +2839,16 @@ async function saveReservationEdit(reservation) {
     const startIso = localInputToIso(startInput.value);
     const endIso = localInputToIso(endInput.value);
     validateShortenedReservationWindow(reservation, startIso, endIso);
+
+    const originalEnd = new Date(reservation.end_time).getTime();
+    const nextEnd = new Date(endIso).getTime();
+    if (nextEnd > originalEnd) {
+      const extensionConflict = await findReservationExtensionConflict(reservation, startIso, endIso);
+      if (extensionConflict) {
+        message.textContent = formatReservationExtensionConflictMessage(extensionConflict);
+        return;
+      }
+    }
 
     const patch = {
       project_name: projectName,
@@ -3168,27 +3261,45 @@ async function submitRequester(event) {
 
 function renderRequesterSummary() {
   const root = document.getElementById("requesterSummary");
+  const searchInput = document.getElementById("requesterSearchInput");
+  const resultCount = document.getElementById("requesterResultCount");
+  const searchTerm = String(state.requesterSearchTerm || "").trim();
+  const filteredRequesters = getFilteredRequesters();
+
+  if (searchInput && searchInput.value !== state.requesterSearchTerm) {
+    searchInput.value = state.requesterSearchTerm;
+  }
+  if (resultCount) {
+    resultCount.textContent = `顯示 ${filteredRequesters.length} / ${state.requesters.length} 位使用者`;
+  }
+
   if (!state.requesters.length) {
     root.innerHTML = '<article class="empty-card">目前尚無使用者資料。</article>';
     return;
   }
+  if (!filteredRequesters.length) {
+    root.innerHTML = `<article class="empty-card">找不到符合「${escapeHtml(searchTerm)}」的使用者，請改用姓名或 Email 片段搜尋。</article>`;
+    return;
+  }
 
-  root.innerHTML = state.requesters.map((item) => {
+  root.innerHTML = filteredRequesters.map((item) => {
     const category = getRequesterCategory(item);
     return `
     <article class="equipment-card requester-card requester-category-${escapeHtml(category.key)}">
-      <div>
-        <h3>${escapeHtml(item.name)}</h3>
-        <div class="equipment-state">
-          <span class="requester-category-badge requester-category-${escapeHtml(category.key)}">${escapeHtml(category.label)}</span>
-          ${item.is_active ? "" : '<span class="badge inactive">停用</span>'}
+      <div class="requester-card-content">
+        <div class="requester-card-heading">
+          <h3>${escapeHtml(item.name)}</h3>
+          <div class="equipment-state">
+            <span class="requester-category-badge requester-category-${escapeHtml(category.key)}">${escapeHtml(category.label)}</span>
+            ${item.is_active ? "" : '<span class="badge inactive">停用</span>'}
+          </div>
         </div>
         <div class="equipment-card-meta">
           <span>Email：${escapeHtml(item.email)}</span>
           <span>部門：${escapeHtml(item.department || "PQE")}</span>
         </div>
       </div>
-      <div class="equipment-card-actions">
+      <div class="equipment-card-actions requester-card-actions">
         <button type="button" class="secondary requester-edit-btn" data-edit-requester="${item.id}">編輯</button>
         <button type="button" class="danger-link requester-delete-btn" data-delete-requester="${item.id}">刪除</button>
       </div>
@@ -3488,14 +3599,27 @@ function updateBulletinScrollSettings() {
   scheduleBulletinAutoScroll();
 }
 
+function isPqeRequesterEmail(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail || !Array.isArray(state?.requesters)) return false;
+  return state.requesters.some((requester) => {
+    const requesterEmail = String(requester?.email || "").trim().toLowerCase();
+    const department = String(requester?.department || "").trim().toUpperCase();
+    return requesterEmail === normalizedEmail && department === "PQE";
+  });
+}
+
 function getRequesterCategory(requester) {
   const department = String(requester?.department || "").trim().toUpperCase();
   const email = String(requester?.email || requester?.requester_email || "").trim().toLowerCase();
-  if (department === "PQE") {
+  if (isPqeRequesterEmail(email)) {
     return { key: "pqe", label: "PQE" };
   }
   if (email.endsWith("@senao.com")) {
     return { key: "senao", label: "神準內部" };
+  }
+  if (!email && department === "PQE") {
+    return { key: "pqe", label: "PQE" };
   }
   return { key: "external", label: "外部" };
 }
