@@ -649,6 +649,22 @@
     </form>
   </dialog>
 
+  <dialog id="reservationEditStatusDialog" class="reservation-edit-status-dialog" aria-labelledby="reservationEditStatusTitle" aria-describedby="reservationEditStatusMessage">
+    <div class="reservation-edit-status-shell">
+      <div class="reservation-edit-status-content">
+        <div class="reservation-edit-status-icon" data-status-icon aria-hidden="true">i</div>
+        <div>
+          <p class="reservation-edit-status-kicker">預約修改結果</p>
+          <h2 id="reservationEditStatusTitle">修改結果</h2>
+          <p id="reservationEditStatusMessage" role="status"></p>
+        </div>
+      </div>
+      <div class="form-actions reservation-edit-status-actions">
+        <button type="button" id="reservationEditStatusCloseBtn" class="secondary">確定</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="equipmentEditorDialog" class="equipment-editor-dialog">
     <div class="equipment-editor-shell">
       <div class="dialog-header">

@@ -2633,6 +2633,68 @@ function renderEquipmentScheduleDialog(equipment) {
   });
 }
 
+function bindReservationEditStatusDialog(dialog) {
+  if (!dialog || dialog.dataset.reservationEditStatusBound === "true") return;
+
+  const closeButton = document.getElementById("reservationEditStatusCloseBtn");
+  closeButton?.addEventListener("click", () => {
+    if (dialog.open && typeof dialog.close === "function") {
+      dialog.close();
+    }
+  });
+  dialog.dataset.reservationEditStatusBound = "true";
+}
+
+function showReservationEditStatus({ title, message, tone = "info" } = {}) {
+  const safeTone = ["success", "error", "info"].includes(tone) ? tone : "info";
+  const safeMessage = String(message || "");
+  const safeTitle = title || (safeTone === "success" ? "修改成功" : safeTone === "error" ? "修改失敗" : "修改預約");
+  const dialog = document.getElementById("reservationEditStatusDialog");
+  if (!dialog) return false;
+
+  const titleElement = document.getElementById("reservationEditStatusTitle");
+  const messageElement = document.getElementById("reservationEditStatusMessage");
+  const iconElement = dialog.querySelector("[data-status-icon]");
+  if (titleElement) titleElement.textContent = safeTitle;
+  if (messageElement) {
+    messageElement.textContent = safeMessage;
+    messageElement.setAttribute("role", safeTone === "error" ? "alert" : "status");
+  }
+  if (iconElement) iconElement.textContent = safeTone === "success" ? "✓" : safeTone === "error" ? "!" : "i";
+  dialog.dataset.tone = safeTone;
+  bindReservationEditStatusDialog(dialog);
+
+  try {
+    if (!dialog.open) {
+      if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+      } else if (typeof dialog.show === "function") {
+        dialog.show();
+      }
+    }
+    return Boolean(dialog.open);
+  } catch (error) {
+    console.warn("Reservation edit status dialog failed to open", error);
+    return false;
+  }
+}
+
+function setReservationEditMessage(message, tone = "info", title = "") {
+  const text = String(message || "");
+  const inlineMessage = document.getElementById("reservationEditMessage");
+  if (inlineMessage) {
+    inlineMessage.textContent = text;
+    inlineMessage.dataset.tone = tone;
+  }
+
+  try {
+    return showReservationEditStatus({ title, message: text, tone });
+  } catch (error) {
+    console.warn("Reservation edit status notification failed", error);
+    return false;
+  }
+}
+
 function openReservationDetail(reservation) {
   const view = getReservationViewModel(reservation);
   const dialog = document.getElementById("reservationDetailDialog");
@@ -2667,8 +2729,11 @@ function openReservationDetail(reservation) {
   const isReadOnly = ["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation));
   cancelButton.hidden = isReadOnly;
   cancelButton.onclick = () => cancelProject(reservation);
-  configureReservationEdit(reservation);
+  const editIsReadOnly = configureReservationEdit(reservation);
   dialog.showModal();
+  if (editIsReadOnly) {
+    setReservationEditMessage("已完成或已取消的預約只能瀏覽，不能再修改。", "error", "預約不可修改");
+  }
 }
 
 function configureReservationEdit(reservation) {
@@ -2680,7 +2745,7 @@ function configureReservationEdit(reservation) {
   const endInput = document.getElementById("reservationEditEnd");
   const saveButton = document.getElementById("reservationEditSaveBtn");
   const message = document.getElementById("reservationEditMessage");
-  if (!emailInput || !unlockButton || !projectInput || !startInput || !endInput || !saveButton || !message) return;
+  if (!emailInput || !unlockButton || !projectInput || !startInput || !endInput || !saveButton) return false;
 
   const isReadOnly = ["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation));
   if (panel) {
@@ -2690,15 +2755,19 @@ function configureReservationEdit(reservation) {
   projectInput.value = reservation.project_name || "";
   startInput.value = toDateTimeInput(new Date(reservation.start_time));
   endInput.value = toDateTimeInput(new Date(reservation.end_time));
-  message.textContent = "";
+  if (message) {
+    message.textContent = "";
+    message.dataset.tone = "";
+  }
   setReservationEditUnlocked(false);
   if (isReadOnly) {
     unlockButton.onclick = null;
     saveButton.onclick = null;
-    return;
+    return true;
   }
   unlockButton.onclick = () => unlockReservationEdit(reservation);
   saveButton.onclick = () => saveReservationEdit(reservation);
+  return false;
 }
 
 function setReservationEditUnlocked(isUnlocked) {
@@ -2713,17 +2782,16 @@ function setReservationEditUnlocked(isUnlocked) {
 
 function unlockReservationEdit(reservation) {
   const emailInput = document.getElementById("reservationEditEmail");
-  const message = document.getElementById("reservationEditMessage");
-  if (!emailInput || !message) return;
+  if (!emailInput) return;
 
   if (!emailMatchesReservation(emailInput.value, reservation)) {
     setReservationEditUnlocked(false);
-    message.textContent = "Email 不符合此筆預約者，無法解鎖。";
+    setReservationEditMessage("Email 不符合此筆預約者，無法解鎖。", "error", "解鎖失敗");
     return;
   }
 
   setReservationEditUnlocked(true);
-  message.textContent = "已解鎖，可修改專案名稱，並可縮短或延長預約時間（延長受同設備後續有效預約限制）。";
+  setReservationEditMessage("已解鎖，可修改專案名稱，並可縮短或延長預約時間（延長受同設備後續有效預約限制）。", "success", "解鎖成功");
 }
 
 function emailMatchesReservation(email, reservation) {
@@ -2816,26 +2884,30 @@ function formatReservationExtensionConflictMessage(conflict) {
 }
 
 async function saveReservationEdit(reservation) {
-  assertClientReady();
-  const projectInput = document.getElementById("reservationEditProject");
-  const startInput = document.getElementById("reservationEditStart");
-  const endInput = document.getElementById("reservationEditEnd");
-  const message = document.getElementById("reservationEditMessage");
-  const dialog = document.getElementById("reservationDetailDialog");
-  if (!projectInput || !startInput || !endInput || !message) return;
-
-  if (["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation))) {
-    message.textContent = "已完成或已取消的預約只能瀏覽，不能再修改。";
-    return;
-  }
-
-  const projectName = String(projectInput.value || "").trim();
-  if (!projectName) {
-    message.textContent = "請輸入專案名稱。";
-    return;
-  }
-
+  let dialog = null;
+  let reservationsUpdated = false;
+  let postUpdateStage = "history";
   try {
+    assertClientReady();
+    const projectInput = document.getElementById("reservationEditProject");
+    const startInput = document.getElementById("reservationEditStart");
+    const endInput = document.getElementById("reservationEditEnd");
+    dialog = document.getElementById("reservationDetailDialog");
+    if (!projectInput || !startInput || !endInput) {
+      throw new Error("修改預約介面載入失敗，請重新開啟預約明細。");
+    }
+
+    if (["cancelled", "checked_out"].includes(getEffectiveReservationStatus(reservation))) {
+      setReservationEditMessage("已完成或已取消的預約只能瀏覽，不能再修改。", "error", "預約不可修改");
+      return;
+    }
+
+    const projectName = String(projectInput.value || "").trim();
+    if (!projectName) {
+      setReservationEditMessage("請輸入專案名稱。", "error", "修改失敗");
+      return;
+    }
+
     const startIso = localInputToIso(startInput.value);
     const endIso = localInputToIso(endInput.value);
     validateShortenedReservationWindow(reservation, startIso, endIso);
@@ -2845,7 +2917,7 @@ async function saveReservationEdit(reservation) {
     if (nextEnd > originalEnd) {
       const extensionConflict = await findReservationExtensionConflict(reservation, startIso, endIso);
       if (extensionConflict) {
-        message.textContent = formatReservationExtensionConflictMessage(extensionConflict);
+        setReservationEditMessage(formatReservationExtensionConflictMessage(extensionConflict), "error", "修改失敗");
         return;
       }
     }
@@ -2863,6 +2935,7 @@ async function saveReservationEdit(reservation) {
       .select()
       .single();
     assertNoError(updateError, "更新預約失敗");
+    reservationsUpdated = true;
 
     const { error: historyError } = await state.client
       .from("reservation_history")
@@ -2873,14 +2946,32 @@ async function saveReservationEdit(reservation) {
         new_value: updated,
         changed_by_name: reservation.requester_name,
       });
-    assertNoError(historyError, "寫入預約歷程失敗");
+    if (historyError) throw historyError;
 
-    message.textContent = "預約已更新。";
+    postUpdateStage = "refresh";
     await loadReservations();
     renderAll();
     dialog?.close();
+    setReservationEditMessage("預約已更新。", "success", "修改成功");
   } catch (error) {
-    message.textContent = error.message;
+    if (reservationsUpdated) {
+      const originalError = String(error?.message || error || "未知錯誤");
+      if (postUpdateStage === "history") {
+        setReservationEditMessage(
+          `預約已更新，但預約歷程寫入失敗：${originalError}。請通知管理員。`,
+          "error",
+          "預約已更新，但預約歷程寫入失敗",
+        );
+      } else {
+        setReservationEditMessage(
+          `預約已更新，但畫面重新整理失敗，請稍後重新整理。原始錯誤：${originalError}`,
+          "error",
+          "預約已更新，但畫面重新整理失敗",
+        );
+      }
+      return;
+    }
+    setReservationEditMessage(error?.message || "修改預約失敗。", "error", "修改失敗");
   }
 }
 

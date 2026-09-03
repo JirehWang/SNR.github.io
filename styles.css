@@ -1688,6 +1688,97 @@ textarea:focus {
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
 }
 
+.reservation-edit-status-dialog {
+  width: min(460px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.32);
+}
+
+.reservation-edit-status-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.reservation-edit-status-shell {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+}
+
+.reservation-edit-status-content {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.reservation-edit-status-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.reservation-edit-status-kicker {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.reservation-edit-status-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.reservation-edit-status-dialog p:last-child {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reservation-edit-status-dialog[data-tone="success"] {
+  border-color: #86efac;
+}
+
+.reservation-edit-status-dialog[data-tone="success"] .reservation-edit-status-icon {
+  background: #dcfce7;
+  color: var(--ok);
+}
+
+.reservation-edit-status-dialog[data-tone="success"] h2 {
+  color: var(--ok);
+}
+
+.reservation-edit-status-dialog[data-tone="error"] {
+  border-color: #fca5a5;
+}
+
+.reservation-edit-status-dialog[data-tone="error"] .reservation-edit-status-icon {
+  background: #fee2e2;
+  color: var(--danger);
+}
+
+.reservation-edit-status-dialog[data-tone="error"] h2 {
+  color: var(--danger);
+}
+
+.reservation-edit-status-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
 .equipment-schedule-dialog {
   width: min(1120px, calc(100vw - 32px));
   border: 0;
@@ -2323,6 +2414,28 @@ th {
 
   .reservation-detail-actions {
     grid-template-columns: 1fr;
+  }
+
+  .reservation-edit-status-dialog {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+  }
+
+  .reservation-edit-status-shell {
+    gap: 16px;
+    padding: 18px;
+  }
+
+  .reservation-edit-status-content {
+    gap: 10px;
+  }
+
+  .reservation-edit-status-actions {
+    justify-content: stretch;
+  }
+
+  .reservation-edit-status-actions button {
+    width: 100%;
   }
 
   .reservation-status-actions {
